@@ -28,14 +28,32 @@ Game state persists to `data/rooms.json` and survives restarts.
 
 ## How it works
 
-- `server.js` — HTTP + Server-Sent Events, rooms, auth tokens, persistence.
+- `server.js` — HTTP + Server-Sent Events, rooms, auth tokens, persistence,
+  server-side tab/auction timers (auto-lock, restart recovery).
 - `game.js` — the full rules engine (same logic as the single-file tracker):
   Bull/Mixed/Bear movement tables, momentum −4…+4, bubble indicator with hidden
   random threshold, 15 random events, 3 bubble decks, margin/shorts/collateral,
   fire sales, persistent flow, market-maker tabs, warrants (exercise/decay),
   conversions, splits, bankruptcy, 14 toggleable house rules.
-- `index.html` — the phone UI. Host runs the GM stepper; players enter
-  trades and hit Submit; everything syncs live.
+- `index.html` — the phone UI. Host runs the GM stepper; players place tabs
+  and announce quantities; everything syncs live.
+
+## Trading flow (original rules)
+
+1. **Tabs** — the broker (host) starts a timed tab placement (default 60s,
+   adjustable 5–600s) from the GM tab. During the timer, players tap
+   Buy/Sell/Short/Cover/M.Buy tabs per asset — direction only, no quantities.
+   Tabs can be changed until the timer expires, then they lock and become
+   irrevocable. A player may not buy and sell the same asset in one round.
+   Other players' tabs are hidden from each browser until the lock.
+2. **Execute** — quantities are announced player by player (stocks/warrants in
+   lots of 10, bonds singly). If a player can't fund their buys, the host runs
+   a 60-second **funding auction**: the short player auctions assets to the
+   highest bidder, and/or the host records a private loan. A player who still
+   can't pay goes **bankrupt** (out of the game).
+3. Sales execute before buys. If the bank runs short of shares, smaller buy
+   orders fill first (ties broken randomly). All tab demand — filled or not —
+   still counts toward market movement.
 
 ## Notes
 

@@ -12,8 +12,8 @@ const MOVE={
  bear:{bc:[-2,-3,-5,-7,-10,-13],spec:[-4,-7,-11,-16,-22,-50],pref:[0,-1,-2,-3,-5,-7],bond:[-4,-6,-10,-14,-20,-26],warr:[-1,-1,-2,-2,-4,-8]}};
 const MOMMOD={bc:[0,0,1,2,4],spec:[0,2,5,10,18],pref:[0,0,1,3,5],bond:[0,0,2,4,8],warr:[0,1,3,6,10]};
 const DIRA={buy:'buy',marginbuy:'buy',cover:'buy',exercise:'buy',sell:'sell',short:'sell'};
-const PHASES=['trading','resolve','event','market','moves','firesale','bubble','endround'];
-const PHLBL={trading:'Trading',resolve:'Resolve',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
+const PHASES=['trading','execute','event','market','moves','firesale','bubble','endround'];
+const PHLBL={trading:'Tabs',execute:'Execute',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
 function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
 /* Movement columns scale with player count: 4-6 players -> Buy 3+ max (classic card);
    larger games extend the card (e.g. 10 players -> Buy 5+ / Sell 4+), extrapolating values. */
@@ -142,7 +142,7 @@ function feed(t){ const s=String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').r
 function player(pid){ return S.players.find(p=>p.id===pid); }
 function longVal(p){ let v=0; ASSETS.forEach(a=>v+=(p.hold[a]||0)*unitVal(a)); return v; }
 function shortLiab(p){ let v=0; ASSETS.forEach(a=>v+=(p.short[a]||0)*unitVal(a)); return v; }
-function netWorth(p){ return p.cash+longVal(p)+(p.collat||0)-shortLiab(p)-(p.loan||0); }
+function netWorth(p){ return p.cash+longVal(p)+(p.collat||0)-shortLiab(p)-(p.loan||0)-loansOwed(p.id)+loansDue(p.id); }
 function marginExcess(p){ return 0.5*longVal(p)-(p.loan||0); }
 function shortExcess(p){ return (p.collat||0)-0.5*shortLiab(p); }
 function inventory(a){ let l=0,s=0; S.players.forEach(p=>{ l+=(p.hold[a]||0); s+=(p.short[a]||0); }); return S.outstanding[a]-l-s; }
@@ -175,6 +175,8 @@ function tradeError(pid,asset,action,qty){
   if((action==='convPref'||action==='convBond')&&!ruleOn('conversions')) return 'Conversions are disabled (house rules).';
   if(!(qty>0)) return 'Enter a quantity above 0.';
   if(!Number.isInteger(qty)) return 'Whole shares only.';
+  if(asset!=='bond'&&(action==='buy'||action==='sell'||action==='short'||action==='cover'||action==='marginbuy'||action==='exercise')&&qty%10!==0)
+    return 'Stocks and warrants trade in lots of 10 (bonds singly).';
   const v=unitVal(asset), hold=p.hold[asset]||0;
   const tr=S.trades[pid]||{};
   if(asset==='spec'&&tr.warr&&tr.warr.action==='exercise'&&(action==='sell'||action==='short'))
@@ -240,6 +242,7 @@ function newGame(cfg){
     players:names.map(nm=>({id:uid(),name:nm.trim(),cash:cash,
       hold:Object.assign(blankHold(),{bc:bcS,spec:spS}),short:blankHold(),loan:0,collat:0,freshSpec:null})),
     trades:{},cashAct:{},tabs:{persistent:[],mm:[],sched:[]},sched:[],
+    timerDur:60,tradeTimer:null,auction:null,shortfalls:{},loans:[],
     pendingMoves:blankMoves(),nextMoves:blankMoves(),
     fireChecks:[],firesale:[],preview:null,feed:[],history:[],
     noMarginBuy:false,fireOverride:null,bondBuyDouble:false,bubbleFreeze:false,specNoBubble:false,
@@ -259,6 +262,7 @@ function newGame(cfg){
 }
 function startRound(first){
   S.phase='trading'; S.trades={}; S.cashAct={}; S.tradeErr={}; S.cashErr={};
+  S.tradeTimer=null; S.auction=null; S.shortfalls={};
   S.tabs.mm=[]; S.tabs.sched=[]; S.fireChecks=[]; S.firesale=[]; S.preview=null;
   S.pendingMoves=blankMoves(); S.eventCard=null; S.bubbleCard=null; S.lastD12=null;
   S.noMarginBuy=false; S.fireOverride=null; S.bondBuyDouble=false;
@@ -300,50 +304,6 @@ function genMM(){
   S.tabs.mm=[];
   for(let i=0;i<mm;i++) S.tabs.mm.push({asset:ASSETS[Math.floor(Math.random()*ASSETS.length)],dir:Math.random()<0.5?'buy':'sell',mm:true});
   feed('🎲 Market-maker tabs regenerated: '+ (mm?S.tabs.mm.map(t=>t.dir.toUpperCase()+' '+ASH[t.asset]).join(', '):'none')+'.');
-  
-}
-function lockResolve(){
-  // cash actions first
-  Object.keys(S.cashAct||{}).forEach(pid=>{
-    const p=player(pid); if(!p) return; const c=S.cashAct[pid]||{};
-    if(c.repay>0){ const v=Math.min(c.repay,p.loan||0,p.cash); p.cash-=v; p.loan-=v; if(v>0) feed('💵 '+p.name+' repaid '+fmt(v)+' margin.'); }
-    if(c.addC>0){ const v=Math.min(c.addC,p.cash); p.cash-=v; p.collat=(p.collat||0)+v; if(v>0) feed('🔒 '+p.name+' added '+fmt(v)+' short collateral.'); }
-    if(c.relC>0){ const v=Math.min(c.relC,shortExcess(p)); p.cash+=v; p.collat-=v; if(v>0) feed('🔓 '+p.name+' released '+fmt(v)+' short collateral.'); }
-  });
-  const sellQty={bc:0,spec:0,pref:0,bond:0,warr:0};
-  S.players.forEach(p=>{
-    const tr=S.trades[p.id]||{};
-    ASSETS.forEach(a=>{
-      const e=tr[a]; if(!e||!e.action) return;
-      const err=tradeError(p.id,a,e.action,e.qty);
-      if(err){ feed('⚠️ '+p.name+' '+ANAME[a]+' '+e.action+' '+e.qty+' skipped: '+err); return; }
-      const v=unitVal(a), q=e.qty;
-      if(e.action==='buy'){ p.cash-=q*v; p.hold[a]+=q; feed('🟢 '+p.name+' bought '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
-      else if(e.action==='marginbuy'){ p.cash-=q*v/2; p.loan=(p.loan||0)+q*v/2; p.hold[a]+=q; feed('🟡 '+p.name+' margin-bought '+q+' '+ASH[a]+' ('+fmt(q*v/2)+' cash + '+fmt(q*v/2)+' loan).'); }
-      else if(e.action==='sell'){ p.hold[a]-=q; p.cash+=q*v; sellQty[a]+=q; feed('🔴 '+p.name+' sold '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
-      else if(e.action==='short'){ p.cash+=q*v/2; p.collat=(p.collat||0)+q*v/2; p.short[a]+=q; sellQty[a]+=q; feed('🔴 '+p.name+' shorted '+q+' '+ASH[a]+' ('+fmt(q*v/2)+' cash, '+fmt(q*v/2)+' collateral).'); }
-      else if(e.action==='cover'){ p.cash-=q*v; p.short[a]-=q; feed('🟢 '+p.name+' covered '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
-      else if(e.action==='exercise'){ p.hold.warr-=q; p.hold.spec+=q; p.cash-=q*S.strike; p.freshSpec={qty:q,round:S.round}; feed('📜 '+p.name+' exercised '+q+' warrants → '+q+' SPEC ('+fmt(q*S.strike)+').'); }
-      else if(e.action==='convPref'){ p.hold.pref-=q; const g=q*convRatio(); p.hold.bc+=g; feed('🔁 '+p.name+' converted '+q+' PF → '+g+' BC.'); }
-      else if(e.action==='convBond'){ p.hold.bond-=q; const g=q*20*convRatio(); p.hold.bc+=g; feed('🔁 '+p.name+' converted '+q+' BOND → '+g+' BC.'); }
-    });
-  });
-  // fire-sale checks
-  S.fireChecks=[];
-  if(!ruleOn('firesale')){ feed('🚫 Fire sales disabled (house rules).'); }
-  else if(S.fireOverride==='ignore'){ feed('🚫 Fire Sale checks ignored (event).'); }
-  else ASSETS.forEach(a=>{
-    const pct=S.outstanding[a]>0?sellQty[a]/S.outstanding[a]:0;
-    if(pct<=0) return;
-    let status='normal', roll=S.fireOverride&&S.fireOverride.roll!=null?S.fireOverride.roll:0.5,
-        auto=S.fireOverride&&S.fireOverride.auto!=null?S.fireOverride.auto:0.75;
-    if(S.fireOverride==='autoAll') status='auto';
-    else if(pct>=auto) status='auto';
-    else if(pct>=roll) status='roll';
-    S.fireChecks.push({asset:a,pct:pct,status:status});
-    if(status!=='normal') feed('🔥 Fire Sale '+(status==='auto'?'AUTOMATIC':'check (roll needed)')+' on '+ANAME[a]+' — '+Math.round(pct*100)+'% of outstanding offered.');
-  });
-  S.phase='event';
   
 }
 /* ================= EVENT PHASE ================= */
@@ -659,26 +619,333 @@ function addPlayer(name){
   feed('👋 '+p.name+' joined the game.');
   return p;
 }
-function submitTrades(pid,trades,cashAct){
+/* ================= TRADING POST: tabs (direction only) ================= */
+const TABACTIONS=['buy','sell','short','marginbuy','cover'];
+function tabError(pid,asset,action){
+  const p=player(pid); if(!p) return 'Unknown player.';
+  if(p.out) return 'Player is out of the game.';
+  if(ASSETS.indexOf(asset)<0) return 'Unknown asset.';
+  if(TABACTIONS.indexOf(action)<0) return 'That action is not a tab.';
+  if(action==='marginbuy'&&!ruleOn('margin')) return 'Margin buying is disabled (house rules).';
+  if((action==='short'||action==='cover')&&!ruleOn('short')) return 'Short selling is disabled (house rules).';
+  return null;
+}
+function submitTabs(pid,tabs){
+  const errs=[];
+  S.trades[pid]=S.trades[pid]||{};
+  ASSETS.forEach(a=>{
+    const act=(tabs||{})[a]||null;
+    if(!act){ if(S.trades[pid][a]&&TABACTIONS.indexOf(S.trades[pid][a].action)>=0) delete S.trades[pid][a]; return; }
+    const err=tabError(pid,a,act);
+    if(err){ errs.push(ANAME[a]+': '+err); return; }
+    const prev=(S.trades[pid][a]||{}).qty||0;
+    S.trades[pid][a]={action:act,qty:prev};
+  });
+  return errs;
+}
+/* ================= TRADING POST: quantities (after the timer) ================= */
+function qtyError(pid,asset,action,qty){
+  // quantity validation WITHOUT cash checks — funding shortfalls go to auction
+  const p=player(pid); if(!p) return 'Unknown player.';
+  if(p.out) return 'Player is out of the game.';
+  if(!(qty>0)) return 'Enter a quantity above 0.';
+  if(!Number.isInteger(qty)) return 'Whole shares only.';
+  if(asset!=='bond'&&(action==='buy'||action==='sell'||action==='short'||action==='cover'||action==='marginbuy'||action==='exercise')&&qty%10!==0)
+    return 'Stocks and warrants trade in lots of 10 (bonds singly).';
+  const v=unitVal(asset), hold=p.hold[asset]||0;
+  const tr=S.trades[pid]||{};
+  if(asset==='spec'&&tr.warr&&tr.warr.action==='exercise'&&(action==='sell'||action==='short'))
+    return 'Exercising warrants this round: cannot sell/short Spec.';
+  if(asset==='warr'&&action==='exercise'&&tr.spec&&(tr.spec.action==='sell'||tr.spec.action==='short'))
+    return 'Cannot exercise while selling/shorting Spec.';
+  if(action==='buy'||action==='marginbuy'){
+    if(action==='marginbuy'){
+      if(S.noMarginBuy) return 'Margin buys are blocked this round.';
+      if(!ruleOn('margin')) return 'Margin buying is disabled (house rules).';
+    }
+    // bank-inventory shortage is enforced at the sales-first allocation stage
+    // (same-round sales can replenish the bank), never at quantity submission.
+  }else if(action==='sell'){
+    let avail=hold;
+    if(asset==='spec'&&p.freshSpec&&p.freshSpec.round===S.round-1) avail=Math.max(0,avail-p.freshSpec.qty);
+    if(qty>avail) return 'You can sell at most '+avail+'.';
+  }else if(action==='short'){
+    if(!ruleOn('short')) return 'Short selling is disabled (house rules).';
+    // bank-inventory check deferred to the sales-first execution stage.
+  }else if(action==='cover'){
+    if(qty>(p.short[asset]||0)) return 'You are short only '+(p.short[asset]||0)+'.';
+  }else if(action==='exercise'){
+    if(!ruleOn('warrants')) return 'Warrants are disabled (house rules).';
+    if(qty>hold) return 'You hold only '+hold+' warrants.';
+  }else if(action==='convPref'||action==='convBond'){
+    if(!ruleOn('conversions')) return 'Conversions are disabled (house rules).';
+    if(qty>hold) return 'You hold only '+hold+'.';
+  }else return 'Unknown action.';
+  return null;
+}
+function submitQty(pid,trades,cashAct){
   const errs=[];
   S.trades[pid]=S.trades[pid]||{};
   Object.keys(trades||{}).forEach(a=>{
     if(ASSETS.indexOf(a)<0) return;
     const e=trades[a];
-    if(!e||!e.action){ delete S.trades[pid][a]; return; }
-    const err=tradeError(pid,a,e.action,Math.round(Number(e.qty)||0));
+    const existing=S.trades[pid][a];
+    if(!e||!e.action){ if(existing&&TABACTIONS.indexOf(existing.action)>=0) existing.qty=0; return; }
+    const execAct=['exercise','convPref','convBond'].indexOf(e.action)>=0;
+    if(!execAct&&(!existing||existing.action!==e.action)){
+      errs.push(ANAME[a]+': no '+e.action+' tab placed — quantity rejected.'); return;
+    }
+    if(execAct&&existing&&existing.action&&existing.action!==e.action){
+      errs.push(ANAME[a]+': conflicts with your '+existing.action+' tab.'); return;
+    }
+    const qty=Math.round(Number(e.qty)||0);
+    if(qty<=0){ if(existing) existing.qty=0; return; } // announce nothing for this tab
+    const err=qtyError(pid,a,e.action,qty);
     if(err){ errs.push(ANAME[a]+': '+err); }
-    else { S.trades[pid][a]={action:e.action,qty:Math.round(Number(e.qty)||0)}; }
+    else { S.trades[pid][a]={action:e.action,qty:qty}; }
   });
   S.cashAct[pid]={};
   ['repay','addC','relC'].forEach(k=>{ const v=Math.max(0,Math.round(Number((cashAct||{})[k])||0)); if(v>0) S.cashAct[pid][k]=v; });
   const p=player(pid);
-  if(p&&Object.keys(S.trades[pid]).length) feed('📥 '+p.name+' submitted '+Object.keys(S.trades[pid]).length+' trade(s).');
+  if(p) feed('📥 '+p.name+' announced quantities.');
   return errs;
+}
+/* ================= TRADING POST: timer ================= */
+function setTimerDur(sec){ sec=Math.max(5,Math.min(600,Math.round(Number(sec))||60)); S.timerDur=sec; return sec; }
+function startTradeTimer(){
+  const sec=S.timerDur||60;
+  S.tradeTimer={endsAt:Date.now()+sec*1000,dur:sec};
+  feed('⏱️ Tab timer started: '+sec+' seconds. Place your buy/sell tabs — quantities come after.');
+  return S.tradeTimer;
+}
+function lockTabs(auto){
+  S.tradeTimer=null;
+  S.phase='execute'; S.shortfalls={}; S.auction=null;
+  feed(auto?'⏱️ Time! Tabs are locked — announce your quantities.':'🔒 Tabs locked by the broker — announce your quantities.');
+}
+/* ================= funding: shortfalls, auctions, loans ================= */
+function cashActVals(pid){
+  const p=player(pid), c=(S.cashAct||{})[pid]||{};
+  return {
+    repay:Math.max(0,Math.min(c.repay||0,p?(p.loan||0):0,p?p.cash:0)),
+    addC:Math.max(0,Math.min(c.addC||0,p?p.cash:0)),
+    relC:Math.max(0,Math.min(c.relC||0,p?shortExcess(p):0))
+  };
+}
+function cashImpact(pid){
+  // net cash change if this player's trades + cash actions execute (negative = needs cash)
+  const p=player(pid); if(!p) return 0;
+  let d=0;
+  const tr=S.trades[pid]||{};
+  ASSETS.forEach(a=>{
+    const e=tr[a]; if(!e||!e.action||!(e.qty>0)) return;
+    const v=unitVal(a), q=e.qty;
+    if(e.action==='buy') d-=q*v;
+    else if(e.action==='marginbuy') d-=q*v/2;
+    else if(e.action==='sell') d+=q*v;
+    else if(e.action==='short') d+=q*v/2;
+    else if(e.action==='cover') d-=q*v;
+    else if(e.action==='exercise') d-=q*S.strike;
+  });
+  const c=cashActVals(pid);
+  d-=c.repay; d-=c.addC; d+=c.relC;
+  return d;
+}
+function computeShortfalls(){
+  const sf={};
+  S.players.forEach(p=>{
+    if(p.out) return;
+    const net=p.cash+cashImpact(p.id);
+    if(net<0) sf[p.id]=Math.round(-net);
+  });
+  S.shortfalls=sf; return sf;
+}
+function openAuction(sellerPid,asset,qty){
+  const p=player(sellerPid);
+  if(!p||p.out) return 'Player is out.';
+  if(S.auction) return 'An auction is already running.';
+  if(!(S.shortfalls&&S.shortfalls[sellerPid]>0)) return 'No shortfall to cover.';
+  if(ASSETS.indexOf(asset)<0) return 'Unknown asset.';
+  qty=Math.round(Number(qty)||0);
+  if(!(qty>0)) return 'Enter a quantity above 0.';
+  if(qty>(p.hold[asset]||0)) return 'You hold only '+(p.hold[asset]||0)+'.';
+  S.auction={seller:sellerPid,asset:asset,qty:qty,bids:[],endsAt:Date.now()+60000};
+  feed('🔨 '+p.name+' auctions '+qty+' '+ASH[asset]+' — 60 seconds, best offer takes it.');
+  return null;
+}
+function placeBid(pid,amount){
+  const a=S.auction;
+  if(!a||Date.now()>a.endsAt) return 'No open auction.';
+  const p=player(pid); if(!p||p.out) return 'Player is out.';
+  if(pid===a.seller) return 'Seller cannot bid.';
+  amount=Math.round(Number(amount)||0);
+  if(!(amount>0)) return 'Enter a bid above 0.';
+  if(amount>p.cash) return 'Not enough cash.';
+  const ex=a.bids.find(b=>b.pid===pid);
+  if(ex){ if(amount<=ex.amt) return 'Raise your bid above '+fmt(ex.amt)+'.'; ex.amt=amount; }
+  else a.bids.push({pid:pid,amt:amount});
+  return null;
+}
+function closeAuction(){
+  const a=S.auction; if(!a) return null;
+  S.auction=null;
+  const seller=player(a.seller);
+  let win=null;
+  a.bids.forEach(b=>{ if(!win||b.amt>win.amt) win=b; }); // earliest bid wins ties
+  if(!win){ feed('🔨 No bids — '+seller.name+'’s '+a.qty+' '+ASH[a.asset]+' lot unsold.'); return {sold:false}; }
+  const bp=player(win.pid);
+  if(!bp||bp.out||(seller.hold[a.asset]||0)<a.qty||bp.cash<win.amt){
+    feed('🔨 Auction void — positions changed.'); computeShortfalls(); return {sold:false};
+  }
+  seller.hold[a.asset]-=a.qty; bp.hold[a.asset]=(bp.hold[a.asset]||0)+a.qty;
+  bp.cash-=win.amt; seller.cash+=win.amt;
+  feed('🔨 Sold! '+bp.name+' wins '+a.qty+' '+ASH[a.asset]+' for '+fmt(win.amt)+'.');
+  computeShortfalls();
+  return {sold:true,winner:win.pid,amt:win.amt};
+}
+function recordLoan(lenderPid,borrowerPid,amount){
+  const l=player(lenderPid), b=player(borrowerPid);
+  amount=Math.round(Number(amount)||0);
+  if(!l||!b||l.out||b.out) return 'Invalid player.';
+  if(lenderPid===borrowerPid) return 'Cannot loan to yourself.';
+  if(!(amount>0)) return 'Enter an amount above 0.';
+  if(amount>l.cash) return l.name+' has only '+fmt(l.cash)+' cash.';
+  l.cash-=amount; b.cash+=amount;
+  S.loans.push({lender:lenderPid,borrower:borrowerPid,amount:amount});
+  feed('🤝 '+l.name+' loaned '+fmt(amount)+' to '+b.name+'.');
+  computeShortfalls();
+  return null;
+}
+function loansOwed(pid){ return (S.loans||[]).filter(l=>l.borrower===pid).reduce((s,l)=>s+l.amount,0); }
+function loansDue(pid){ return (S.loans||[]).filter(l=>l.lender===pid).reduce((s,l)=>s+l.amount,0); }
+function bankrupt(pid){
+  const p=player(pid); if(!p||p.out) return 'Already out.';
+  ASSETS.forEach(a=>{ const sh=p.short[a]||0; if(sh>0){ p.cash-=sh*unitVal(a); p.short[a]=0; } });
+  ASSETS.forEach(a=>{ p.hold[a]=0; });
+  p.out=true;
+  delete S.trades[pid]; delete S.cashAct[pid];
+  if(S.auction&&S.auction.seller===pid) S.auction=null;
+  feed('☠️ '+p.name+' could not cover the shortfall and is OUT of the game.');
+  computeShortfalls();
+  return null;
+}
+/* ================= execute ================= */
+function runExecute(){
+  if(S.auction) return {error:'Close the open auction first.'};
+  const sf=computeShortfalls();
+  const ids=Object.keys(sf);
+  if(ids.length){
+    feed('⚠️ '+ids.map(id=>player(id).name+' is '+fmt(sf[id])+' short').join('; ')+' — auction assets or arrange a loan.');
+    return {shortfalls:sf};
+  }
+  doExecute();
+  return {done:true};
+}
+function doExecute(){
+  S.tradeTimer=null; S.auction=null;
+  // 1) cash actions first (self-clamping)
+  S.players.forEach(p=>{
+    if(p.out) return;
+    const c=cashActVals(p.id);
+    if(c.repay>0){ p.cash-=c.repay; p.loan-=c.repay; feed('💵 '+p.name+' repaid '+fmt(c.repay)+' margin.'); }
+    if(c.addC>0){ p.cash-=c.addC; p.collat=(p.collat||0)+c.addC; feed('🔒 '+p.name+' added '+fmt(c.addC)+' short collateral.'); }
+    if(c.relC>0){ p.cash+=c.relC; p.collat-=c.relC; feed('🔓 '+p.name+' released '+fmt(c.relC)+' short collateral.'); }
+  });
+  // 2) sales execute first (globally) — sells/shorts free up / consume bank inventory,
+  //    then covers/exercises/conversions, then prioritized buys
+  S.players.forEach(p=>{
+    if(p.out) return;
+    const tr=S.trades[p.id]||{};
+    ASSETS.forEach(a=>{
+      const e=tr[a]; if(!e||!e.action||!(e.qty>0)) return;
+      if(e.action!=='sell'&&e.action!=='short') return;
+      const err=qtyError(p.id,a,e.action,e.qty);
+      if(err){ feed('\u26a0\ufe0f '+p.name+' '+ANAME[a]+' '+e.action+' '+e.qty+' skipped: '+err); delete tr[a]; return; }
+      const v=unitVal(a), q=e.qty;
+      // bank-inventory enforcement for shorts lives here (sales-first stage),
+      // not at quantity submission -- same-round sales replenish the bank.
+      if(e.action==='short'&&inventory(a)<q){
+        feed('\u26a0\ufe0f '+p.name+' '+ANAME[a]+' short '+q+' skipped: bank has only '+inventory(a)+' available to borrow.');
+        delete tr[a]; return;
+      }
+      if(e.action==='sell'){ p.hold[a]-=q; p.cash+=q*v; feed('🔴 '+p.name+' sold '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
+      else { p.cash+=q*v/2; p.collat=(p.collat||0)+q*v/2; p.short[a]=(p.short[a]||0)+q; feed('🔴 '+p.name+' shorted '+q+' '+ASH[a]+' ('+fmt(q*v/2)+' cash, '+fmt(q*v/2)+' collateral).'); }
+    });
+  });
+  S.players.forEach(p=>{
+    if(p.out) return;
+    const tr=S.trades[p.id]||{};
+    ASSETS.forEach(a=>{
+      const e=tr[a]; if(!e||!e.action||!(e.qty>0)) return;
+      if(e.action==='sell'||e.action==='short'||e.action==='buy'||e.action==='marginbuy') return;
+      const err=qtyError(p.id,a,e.action,e.qty);
+      if(err){ feed('\u26a0\ufe0f '+p.name+' '+ANAME[a]+' '+e.action+' '+e.qty+' skipped: '+err); return; }
+      const v=unitVal(a), q=e.qty;
+      if(e.action==='cover'){ p.cash-=q*v; p.short[a]-=q; feed('🟢 '+p.name+' covered '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
+      else if(e.action==='exercise'){ p.hold.warr-=q; p.hold.spec=(p.hold.spec||0)+q; p.cash-=q*S.strike; p.freshSpec={qty:q,round:S.round}; feed('📜 '+p.name+' exercised '+q+' warrants \u2192 '+q+' SPEC ('+fmt(q*S.strike)+').'); }
+      else if(e.action==='convPref'){ p.hold.pref-=q; const g=q*convRatio(); p.hold.bc+=g; feed('🔁 '+p.name+' converted '+q+' PF \u2192 '+g+' BC.'); }
+      else if(e.action==='convBond'){ p.hold.bond-=q; const g=q*20*convRatio(); p.hold.bc+=g; feed('🔁 '+p.name+' converted '+q+' BOND \u2192 '+g+' BC.'); }
+    });
+  });
+  // 2c) bank-shortage rule: per asset, smallest buy orders fill first; ties coin-flipped.
+  //     All tab demand (filled or not) still counts for market movement via tabCounts().
+  ASSETS.forEach(a=>{
+    const orders=[];
+    S.players.forEach(p=>{
+      if(p.out) return;
+      const e=(S.trades[p.id]||{})[a];
+      if(!e||!e.action||!(e.qty>0)) return;
+      if(e.action!=='buy'&&e.action!=='marginbuy') return;
+      const err=qtyError(p.id,a,e.action,e.qty);
+      if(err&&err.indexOf('Bank has only')!==0){ feed('\u26a0\ufe0f '+p.name+' '+ANAME[a]+' '+e.action+' '+e.qty+' skipped: '+err); return; }
+      orders.push({pid:p.id,action:e.action,qty:e.qty});
+    });
+    if(!orders.length) return;
+    orders.sort((x,y)=>x.qty-y.qty);
+    for(let i=0;i<orders.length;){ // coin-flip equal-sized orders
+      let j=i+1;
+      while(j<orders.length&&orders[j].qty===orders[i].qty) j++;
+      for(let k=j-1;k>i;k--){ const r=i+Math.floor(Math.random()*(k-i+1)); const t=orders[k]; orders[k]=orders[r]; orders[r]=t; }
+      i=j;
+    }
+    const v=unitVal(a);
+    orders.forEach(o=>{
+      const p=player(o.pid), q=o.qty;
+      if(inventory(a)<q){ feed('\u26a0\ufe0f '+p.name+' '+ANAME[a]+' '+o.action+' '+q+' skipped: bank shortage \u2014 smaller orders filled first.'); return; }
+      if(o.action==='buy'){ p.cash-=q*v; p.hold[a]=(p.hold[a]||0)+q; if(a==='spec') p.freshSpec={qty:q,round:S.round}; feed('🟢 '+p.name+' bought '+q+' '+ASH[a]+' for '+fmt(q*v)+'.'); }
+      else { p.cash-=q*v/2; p.loan=(p.loan||0)+q*v/2; p.hold[a]=(p.hold[a]||0)+q; if(a==='spec') p.freshSpec={qty:q,round:S.round}; feed('🟡 '+p.name+' margin-bought '+q+' '+ASH[a]+' ('+fmt(q*v/2)+' cash + '+fmt(q*v/2)+' loan).'); }
+    });
+  });
+  // sells/shorts count toward fire-sale checks
+  const sellQty={bc:0,spec:0,pref:0,bond:0,warr:0};
+  S.players.forEach(p=>{
+    const tr=S.trades[p.id]||{};
+    ASSETS.forEach(a=>{ const e=tr[a]; if(e&&(e.action==='sell'||e.action==='short')&&e.qty>0) sellQty[a]+=e.qty; });
+  });
+  // fire-sale checks
+  S.fireChecks=[];
+  if(!ruleOn('firesale')){ feed('🚫 Fire sales disabled (house rules).'); }
+  else if(S.fireOverride==='ignore'){ feed('🚫 Fire Sale checks ignored (event).'); }
+  else ASSETS.forEach(a=>{
+    const pct=S.outstanding[a]>0?sellQty[a]/S.outstanding[a]:0;
+    if(pct<=0) return;
+    let status='normal', roll=S.fireOverride&&S.fireOverride.roll!=null?S.fireOverride.roll:0.5,
+        auto=S.fireOverride&&S.fireOverride.auto!=null?S.fireOverride.auto:0.75;
+    if(S.fireOverride==='autoAll') status='auto';
+    else if(pct>=auto) status='auto';
+    else if(pct>=roll) status='roll';
+    S.fireChecks.push({asset:a,pct:pct,status:status});
+    if(status!=='normal') feed('🔥 Fire Sale '+(status==='auto'?'AUTOMATIC':'check (roll needed)')+' on '+ANAME[a]+' — '+Math.round(pct*100)+'% of outstanding offered.');
+  });
+  S.cashAct={}; S.tradeErr={}; S.cashErr={}; S.shortfalls={};
+  S.phase='event';
+  feed('✅ Trades executed. Phase → Event.');
 }
 function getS(){ return S; }
 function setS(s){ S=s; }
-module.exports={newGame,getS,setS,addPlayer,submitTrades,lockResolve,rollD12,setRegime,confirmMoves,
+module.exports={newGame,getS,setS,addPlayer,submitTabs,submitQty,setTimerDur,startTradeTimer,lockTabs,runExecute,
+openAuction,placeBid,closeAuction,recordLoan,bankrupt,loansOwed,loansDue,cashImpact,computeShortfalls,qtyError,tabError,
+rollD12,setRegime,confirmMoves,
 rollFireSale,setFireBuyer,setFireBuyerQty,confirmFireSale,bubbleStep,drawBubble,endRound,genMM,setRule,flipTrend,
 setBubbleRange,forcedCover,player,netWorth,longVal,shortLiab,tabCounts,tradeError,RULES,allTrue,
 PHASES,PHLBL,ASSETS,ANAME,ASH,APER,STARTP,MOVE,MOMMOD,moveCols,colForDyn,maxBuyCol,maxSellCol,RANDEVENTS,BUBBLE_DECKS,imbThreshold,fmt,fmtN};

@@ -81,6 +81,7 @@ label.lbl{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px;}
 details{margin-top:8px;}
 summary{cursor:pointer;color:var(--acc);font-size:13px;padding:8px 0;min-height:44px;}
 .flag{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px;margin-left:6px;}
+.flag{background:#334155;color:#e2e8f0;}
 .flag.mc{background:#7f1d1d;color:#fecaca;}
 .flag.cc{background:#78350f;color:#fde68a;}
 .phasebar{display:flex;overflow-x:auto;gap:4px;margin-bottom:10px;}
@@ -133,8 +134,9 @@ const MOVE={
  bear:{bc:[-2,-3,-5,-7,-10,-13],spec:[-4,-7,-11,-16,-22,-50],pref:[0,-1,-2,-3,-5,-7],bond:[-4,-6,-10,-14,-20,-26],warr:[-1,-1,-2,-2,-4,-8]}};
 const MOMMOD={bc:[0,0,1,2,4],spec:[0,2,5,10,18],pref:[0,0,1,3,5],bond:[0,0,2,4,8],warr:[0,1,3,6,10]};
 const DIRA={buy:'buy',marginbuy:'buy',cover:'buy',exercise:'buy',sell:'sell',short:'sell'};
-const PHASES=['trading','resolve','event','market','moves','firesale','bubble','endround'];
-const PHLBL={trading:'Trading',resolve:'Resolve',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
+const PHASES=['trading','execute','event','market','moves','firesale','bubble','endround'];
+const PHLBL={trading:'Tabs',execute:'Execute',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
+function phaseIdx(){ return PHASES.indexOf(S?S.phase:''); }
 function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
 function colFor(net){ if(net>=3)return 0; if(net===2)return 1; if(net===1)return 2; if(net===0)return 3; if(net===-1)return 4; return 5; }
 
@@ -240,7 +242,9 @@ function longVal(p){ let v=0; ASSETS.forEach(a=>v+=(p.hold[a]||0)*unitVal(a)); r
 
 function shortLiab(p){ let v=0; ASSETS.forEach(a=>v+=(p.short[a]||0)*unitVal(a)); return v; }
 
-function netWorth(p){ return p.cash+longVal(p)+(p.collat||0)-shortLiab(p)-(p.loan||0); }
+function netWorth(p){ return p.cash+longVal(p)+(p.collat||0)-shortLiab(p)-(p.loan||0)-loansOwed(p.id)+loansDue(p.id); }
+function loansOwed(pid){ return (S.loans||[]).filter(l=>l.borrower===pid).reduce((s,l)=>s+l.amount,0); }
+function loansDue(pid){ return (S.loans||[]).filter(l=>l.lender===pid).reduce((s,l)=>s+l.amount,0); }
 
 function marginExcess(p){ return 0.5*longVal(p)-(p.loan||0); }
 
@@ -357,86 +361,181 @@ function boardHTML(){
 }
 
 function tradesHostHTML(){
-  const opts=S.players.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
+  const opts=S.players.map(p=>'<option value="'+p.id+'">'+esc(p.name)+(p.out?' (OUT)':'')+'</option>').join('');
   const sel=ui.tradePid&&player(ui.tradePid)?ui.tradePid:S.players[0].id;
   ui.tradePid=sel;
   return '<h2 class="st">🔄 Trade Entry</h2>'+explainerHTML()+
-  '<div class="card"><label class="lbl">Entering trades for</label><select onchange="ui.tradePid=this.value;draftPid=null;render();">'+opts.replace('value="'+sel+'"','value="'+sel+'" selected')+'</select></div>'+
+  '<div class="card"><label class="lbl">Entering for</label><select onchange="ui.tradePid=this.value;qtyPid=null;render();">'+opts.replace('value="'+sel+'"','value="'+sel+'" selected')+'</select></div>'+
   tradeEntryHTML(sel)+
+  (S.phase==='execute'?auctionHTML():'')+
   submittedHTML();
 }
 
 function tradesPlayerHTML(pid){
   const p=player(pid);
-  return '<h2 class="st">🔄 My Trades — '+esc(p.name)+'</h2>'+explainerHTML()+tradeEntryHTML(pid)+
-  '<div class="card"><h3>📤 Submit</h3><div class="muted">Your trades sync to the live game when you submit.</div>'+
-  '<div class="btnrow"><button class="btn ok" onclick="submitDraft(\''+pid+'\')">📤 Submit my trades</button>'+
-  '<button class="btn ghost" onclick="clearDraft()">Clear</button></div></div>';
+  let h='<h2 class="st">🔄 My Trades \u2014 '+esc(p.name)+'</h2>'+explainerHTML()+tradeEntryHTML(pid);
+  if(S.phase==='execute') h+=auctionHTML();
+  return h;
 }
 
 function tradeEntryHTML(pid){
+  if(S.phase==='trading') return tabEntryHTML(pid);
+  if(S.phase==='execute') return qtyPlayerHTML(pid);
+  return '<div class="card"><b>🔒 Trading is closed</b><div class="muted">Current phase: '+(PHLBL[S.phase]||S.phase)+'. The host advances rounds in the GM tab.</div></div>';
+}
+
+function timerBannerHTML(){
+  if(S.phase==='trading'&&S.tradeTimer) return '<div class="card" style="text-align:center"><b style="font-size:26px;">⏱️ <span id="tcount"></span></b><div class="muted">Place your tabs \u2014 quantities are announced after the timer.</div></div>';
+  return '';
+}
+
+function tabEntryHTML(pid){
   const p=player(pid);
-  if(S.phase!=='trading') return '<div class="card"><b>🔒 Trading is locked</b><div class="muted">Current phase: '+(PHLBL[S.phase]||S.phase)+'. The host advances rounds in the GM tab.</div></div>';
-  let h='<div class="card"><h3>'+esc(p.name)+' — Cash '+fmt(p.cash)+'</h3>';
+  let h=timerBannerHTML()+'<div class="card"><h3>🔄 Tabs \u2014 '+esc(p.name)+'</h3>';
+  if(p.out) return h+'<b>☠️ Out of the game.</b></div>';
+  const live=S.tradeTimer&&Date.now()<S.tradeTimer.endsAt;
+  if(!live) return h+'<div class="muted">⏳ Waiting for the broker to start the tab timer.'+(NET.host?' Start it from the GM tab.':'')+'</div></div>';
+  h+='<div class="muted">Tap a direction to place a tab, tap again to remove. Tabs lock when the timer ends.</div>';
+  const tabs=(S.trades&&S.trades[pid])||{};
   ASSETS.forEach(a=>{
-    ensureDraft(pid); const tr=(draft.trades||{})[a]||{};
-    const hold=p.hold[a]||0, sht=p.short[a]||0;
-    const v=unitVal(a);
-    const err=draftErr[pid+asset];
-    let impact='';
-    if(tr.action&&tr.qty){
-      const q=tr.qty;
-      if(tr.action==='buy') impact='−'+fmt(q*v);
-      else if(tr.action==='marginbuy') impact='−'+fmt(q*v/2)+' cash +'+fmt(q*v/2)+' loan';
-      else if(tr.action==='sell') impact='+'+fmt(q*v);
-      else if(tr.action==='short') impact='+'+fmt(q*v/2)+' cash, '+fmt(q*v/2)+' locked';
-      else if(tr.action==='cover') impact='−'+fmt(q*v);
-      else if(tr.action==='exercise') impact='−'+fmt(q*S.strike);
-      else if(tr.action==='convPref') impact='→ '+q*convRatio()+' BC';
-      else if(tr.action==='convBond') impact='→ '+q*20*convRatio()+' BC';
-    }
+    const cur=tabs[a]?tabs[a].action:null;
+    const hold=p.hold[a]||0, sht=p.short[a]||0, v=unitVal(a);
     h+='<div class="trow"><div class="tinfo"><div class="pn">'+ANAME[a]+' <span class="pp">'+fmt(v)+'/u</span></div>'+
-      '<div class="pp">Own '+hold+(sht?' · Short '+sht:'')+' · Bank '+inventory(a)+'</div>'+
-      (tr.action?'<div class="pp" style="color:var(--acc)">'+tr.action.toUpperCase()+' '+tr.qty+' <span class="pp">'+impact+'</span></div>':'')+
-      (err?'<div class="err">'+esc(err)+'</div>':'')+'</div>'+
-      '<div class="tact">';
+      '<div class="pp">Own '+hold+(sht?' \u00b7 Short '+sht:'')+'</div>'+
+      (cur?'<div class="pp" style="color:var(--acc)">TAB: '+cur.toUpperCase()+'</div>':'')+'</div>'+
+      '<div class="tact"><div class="btnrow">';
     const acts=[['buy','Buy'],['sell','Sell']];
     if(ruleOn('short')) acts.push(['short','Short'],['cover','Cover']);
     if(ruleOn('margin')) acts.push(['marginbuy','M.Buy']);
-    h+='<div class="btnrow">'+acts.map(x=>{
+    h+=acts.map(x=>{
       const cls=x[0]==='buy'||x[0]==='marginbuy'||x[0]==='cover'?'sel-buy':(x[0]==='sell'||x[0]==='short'?'sel-sell':'sel');
-      return '<button class="abtn '+(tr.action===x[0]?cls:'')+'" onclick="setTrade(\''+pid+'\',\''+a+'\',\''+x[0]+'\')">'+x[1]+'</button>';
-    }).join('')+'</div>';
-    if(a==='warr'&&ruleOn('warrants')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='exercise'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'warr\',\'exercise\')">📜 Exercise → SPEC ($'+S.strike+')</button></div>';
-    if(a==='pref'&&ruleOn('conversions')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='convPref'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'pref\',\'convPref\')">🔁 Convert → BC</button></div>';
-    if(a==='bond'&&ruleOn('conversions')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='convBond'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'bond\',\'convBond\')">🔁 Convert → BC</button></div>';
-    if(tr.action) h+='<div class="stepper" style="margin-top:6px;"><button onclick="setQty(\''+pid+'\',\''+a+'\',-1)">−</button>'+
-      '<input value="'+tr.qty+'" inputmode="numeric" onchange="setQtyDirect(\''+pid+'\',\''+a+'\',this.value)"><button onclick="setQty(\''+pid+'\',\''+a+'\',1)">+</button>'+
-      '<span class="small muted" style="margin-left:6px;">'+(a==='bond'?'bonds':'shares')+'</span></div>';
-    h+='</div></div>';
+      return '<button class="abtn '+(cur===x[0]?cls:'')+'" onclick="toggleTab(\''+pid+'\',\''+a+'\',\''+x[0]+'\')">'+x[1]+'</button>';
+    }).join('');
+    h+='</div></div></div>';
   });
-  // cash actions
-  const ca=draft.cashAct||{};
-  const cerr=draftCashErr;
-  h+='<h3 style="margin-top:12px;">💵 Cash / Loans</h3>'+
-  '<div class="kv"><span>Margin loan '+fmt(p.loan||0)+'</span><span>Collateral '+fmt(p.collat||0)+'</span></div>'+
-  cashRow(pid,'repay','Repay margin',ca.repay,cerr[pid+'repay'])+
-  cashRow(pid,'addC','Add short collateral',ca.addC,cerr[pid+'addC'])+
-  cashRow(pid,'relC','Release short collateral',ca.relC,cerr[pid+'relC']);
-  h+='<div class="btnrow" style="margin-top:10px;"><button class="btn ok" onclick="submitDraft(\''+pid+'\')">📤 Submit trades</button><button class="btn ghost" onclick="clearDraft()">Clear</button></div>';
   h+='</div>';
   return h;
 }
 
-function cashRow(pid,kind,label,val,err){
-  return '<div class="trow"><div class="tinfo"><div class="pn" style="font-size:14px;">'+label+'</div>'+(err?'<div class="err">'+esc(err)+'</div>':'')+'</div>'+
-  '<div class="tact"><div class="stepper"><input id="ca_'+pid+'_'+kind+'" value="'+(val||0)+'" inputmode="numeric" style="width:110px;">'+
-  '<button class="btn ghost" style="min-height:48px;margin:0;" onclick="setCashAct(\''+pid+'\',\''+kind+'\',$(\'ca_'+pid+'_'+kind+'\').value)">Set</button></div></div></div>';
+function qtyPlayerHTML(pid){
+  const p=player(pid);
+  ensureQtyDraft(pid);
+  let h='<div class="card"><h3>📝 Quantities \u2014 '+esc(p.name)+'</h3>';
+  if(p.out) return h+'<b>☠️ Out of the game.</b></div>';
+  const sf=(S.shortfalls||{})[pid]||0;
+  if(sf>0) h+='<div class="card" style="border-color:var(--sell)"><b>⚠️ You are '+fmt(sf)+' short.</b><div class="muted">Auction assets below, or ask another player for a loan (the host records it).</div></div>';
+  h+='<div class="muted">Cash '+fmt(p.cash)+'. Announce a quantity for each tab you placed. Stocks/warrants in lots of 10; bonds singly.</div>';
+  const tabs=(S.trades&&S.trades[pid])||{};
+  const tabbed=ASSETS.filter(a=>tabs[a]&&tabs[a].action);
+  if(!tabbed.length) h+='<div class="muted">No tabs placed this round.</div>';
+  tabbed.forEach(a=>{ h+=qtyRowHTML(pid,a,tabs[a].action); });
+  const wtab=tabs['warr'];
+  if(ruleOn('warrants')&&(p.hold.warr||0)>0&&(!wtab||!wtab.action))
+    h+=qtyRowHTML(pid,'warr','exercise',0,'🧾 Exercise warrants \u2192 SPEC ($'+S.strike+' strike)');
+  if(ruleOn('conversions')){
+    const ptab=tabs['pref'];
+    if((p.hold.pref||0)>0&&(!ptab||!ptab.action)) h+=qtyRowHTML(pid,'pref','convPref',0,'🔁 Convert Pref \u2192 BC');
+    const btab=tabs['bond'];
+    if((p.hold.bond||0)>0&&(!btab||!btab.action)) h+=qtyRowHTML(pid,'bond','convBond',0,'🔁 Convert Bonds \u2192 BC');
+  }
+  h+='<h3 style="margin-top:12px;">💵 Cash / Loans</h3>'+
+  '<div class="kv"><span>Margin loan '+fmt(p.loan||0)+'</span><span>Collateral '+fmt(p.collat||0)+'</span></div>';
+  const ca=qtyDraft.cashAct||{};
+  h+=qtyCashRow(pid,'repay','Repay margin',ca.repay)+qtyCashRow(pid,'addC','Add short collateral',ca.addC)+qtyCashRow(pid,'relC','Release short collateral',ca.relC);
+  h+='<div class="btnrow" style="margin-top:10px;"><button class="btn ok" onclick="submitQty(\''+pid+'\')">📤 Submit quantities</button></div>';
+  h+='</div>';
+  return h;
 }
+
+function qtyRowHTML(pid,a,action,unitV,customLabel){
+  ensureQtyDraft(pid);
+  if(!qtyDraft.trades[a]||qtyDraft.trades[a].action!==action) qtyDraft.trades[a]={action:action,qty:0};
+  const cur=qtyDraft.trades[a];
+  const v=unitV||unitVal(a);
+  const imp=impactText(action,cur.qty,v);
+  const label=customLabel||(ANAME[a]+' <span class="pp">'+fmt(v)+'/u</span> \u2014 '+action.toUpperCase());
+  return '<div class="trow"><div class="tinfo"><div class="pn" style="font-size:14px;">'+label+'</div>'+
+    (imp?'<div class="pp" style="color:var(--acc)">'+imp+'</div>':'')+'</div>'+
+    '<div class="tact"><div class="stepper"><button onclick="chQty(\''+pid+'\',\''+a+'\',-1)">\u2212</button>'+
+    '<input value="'+cur.qty+'" inputmode="numeric" onchange="setQtyVal(\''+pid+'\',\''+a+'\',this.value)">'+
+    '<button onclick="chQty(\''+pid+'\',\''+a+'\',1)">+</button></div></div></div>';
+}
+
+function qtyCashRow(pid,kind,label,val){
+  return '<div class="trow"><div class="tinfo"><div class="pn" style="font-size:14px;">'+label+'</div></div>'+
+  '<div class="tact"><div class="stepper"><input id="qc_'+pid+'_'+kind+'" value="'+(val||0)+'" inputmode="numeric" style="width:110px;">'+
+  '<button class="btn ghost" style="min-height:48px;margin:0;" onclick="setQtyCash(\''+pid+'\',\''+kind+'\',$(\'qc_'+pid+'_'+kind+'\').value)">Set</button></div></div></div>';
+}
+
+function impactText(action,qty,v){
+  if(!(qty>0)) return '';
+  if(action==='buy') return '\u2212'+fmt(qty*v);
+  if(action==='marginbuy') return '\u2212'+fmt(qty*v/2)+' cash +'+fmt(qty*v/2)+' loan';
+  if(action==='sell') return '+'+fmt(qty*v);
+  if(action==='short') return '+'+fmt(qty*v/2)+' cash, locked';
+  if(action==='cover') return '\u2212'+fmt(qty*v);
+  if(action==='exercise') return '\u2212'+fmt(qty*S.strike);
+  if(action==='convPref') return '\u2192 '+(qty*convRatio())+' BC';
+  if(action==='convBond') return '\u2192 '+(qty*20*convRatio())+' BC';
+  return '';
+}
+
+function auctionHTML(){
+  const sf=S.shortfalls||{};
+  const ids=Object.keys(sf).filter(pid=>sf[pid]>0&&player(pid)&&!player(pid).out);
+  if(!ids.length&&!S.auction) return '';
+  let h='<div class="card" style="border-color:var(--sell)"><h3>🔨 Funding Auction</h3>';
+  if(ids.length){
+    h+='<div class="muted">These players cannot fund their tabs:</div>';
+    ids.forEach(pid=>{ const p=player(pid);
+      h+='<div class="kv"><span>⚠️ '+esc(p.name)+'</span><b>'+fmt(sf[pid])+' short</b></div>';
+      if(NET.host) h+='<div class="btnrow"><button class="btn warnb" onclick="bankrupt(\''+pid+'\')">☠️ Bankrupt '+esc(p.name)+'</button></div>';
+    });
+  }
+  const a=S.auction;
+  if(a){
+    const seller=player(a.seller);
+    h+='<div class="card" style="background:var(--card2)"><b>🔨 '+esc(seller?seller.name:'?')+' auctions '+a.qty+' '+ASH[a.asset]+'</b> <span class="muted">\u00b7 <span id="acount"></span></span>';
+    const bids=[...a.bids].sort((x,y)=>y.amt-x.amt);
+    h+=bids.length?bids.map(b=>{const bp=player(b.pid);return '<div class="kv"><span>'+esc(bp?bp.name:'?')+'</span><b>'+fmt(b.amt)+'</b></div>';}).join(''):'<div class="muted">No bids yet \u2014 best offer takes it.</div>';
+    if(!NET.host&&NET.playerId&&NET.playerId!==a.seller&&player(NET.playerId)&&!player(NET.playerId).out){
+      h+='<div class="stepper"><input id="bidAmt" inputmode="numeric" placeholder="Your bid $" style="width:130px;">'+
+      '<button class="btn ok" style="min-height:48px;margin:0;" onclick="placeBid()">Bid</button></div>';
+    }
+    if(NET.host) h+='<div class="btnrow"><button class="btn ghost" onclick="closeAuction()">🔨 Close auction now</button></div>';
+    h+='</div>';
+  }else{
+    const myShort=(!NET.host&&ids.indexOf(NET.playerId)>=0)?NET.playerId:null;
+    if(NET.host&&!ui.auctionPid) ui.auctionPid=ids[0];
+    const target=NET.host?ui.auctionPid:myShort;
+    if(target&&player(target)){
+      const p=player(target);
+      const assets=ASSETS.filter(x=>(p.hold[x]||0)>0);
+      h+='<div class="muted">'+esc(p.name)+', put assets up for auction:</div>';
+      if(NET.host) h+='<label class="lbl">Seller</label><select onchange="ui.auctionPid=this.value;render();">'+ids.map(pid=>'<option value="'+pid+'"'+(pid===target?' selected':'')+'>'+esc(player(pid).name)+'</option>').join('')+'</select>';
+      if(assets.length){
+        h+='<div class="stepper"><select id="aucAsset">'+assets.map(x=>'<option value="'+x+'">'+ASH[x]+' (own '+(p.hold[x]||0)+')</option>').join('')+'</select>'+
+        '<input id="aucQty" inputmode="numeric" placeholder="Qty" style="width:80px;">'+
+        '<button class="btn warnb" style="min-height:48px;margin:0;" onclick="openAuction(\''+target+'\')">🔨 Auction</button></div>';
+      }else h+='<div class="muted">No assets to auction.</div>';
+    }
+  }
+  if(NET.host&&ids.length){
+    const others=S.players.filter(p=>!p.out);
+    h+='<div class="muted" style="margin-top:8px;">Record a private loan:</div><div class="stepper">'+
+      '<select id="loanL">'+others.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('')+'</select><span class="muted">\u2192</span>'+
+      '<select id="loanB">'+ids.map(pid=>'<option value="'+pid+'">'+esc(player(pid).name)+'</option>').join('')+'</select>'+
+      '<input id="loanAmt" inputmode="numeric" placeholder="$" style="width:80px;">'+
+      '<button class="btn" style="min-height:48px;margin:0;" onclick="recordLoan()">🤝 Record</button></div>';
+  }
+  h+='</div>';
+  return h;
+}
+
 
 function playerRowHTML(p,rank){
   const me=marginExcess(p), se=shortExcess(p), nw=netWorth(p);
-  let h='<tr><td><b>'+rank+'. '+esc(p.name)+'</b>'+
+  let h='<tr><td><b>'+rank+'. '+esc(p.name)+'</b>'+(p.out?'<span class="flag">OUT</span>':'')+
     (me<0?'<span class="flag mc">MARGIN CALL</span>':'')+(se<0?'<span class="flag cc">COLLATERAL CALL</span>':'')+'</td>'+
     '<td class="num">'+fmt(p.cash)+'</td><td class="num">'+fmt(longVal(p))+'</td>'+
     '<td class="num">'+fmt(nw)+'</td></tr>';
@@ -509,8 +608,9 @@ function historyHTML(){
   });
   h+='</table></div>';
   if(S.phase==='over'){
-    const sorted=[...S.players].sort((a,b)=>netWorth(b)-netWorth(a));
-    h+='<div class="card" style="border-color:var(--buy)"><h3>🏆 '+esc(sorted[0].name)+' wins with '+fmt(netWorth(sorted[0]))+'!</h3>'+
+    const sorted=[...S.players].filter(p=>!p.out).sort((a,b)=>netWorth(b)-netWorth(a));
+    const win=sorted[0]||S.players[0];
+    h+='<div class="card" style="border-color:var(--buy)"><h3>🏆 '+esc(win.name)+' wins with '+fmt(netWorth(win))+'!</h3>'+
     sorted.map((p,i)=>(i+1)+'. '+esc(p.name)+' — '+fmt(netWorth(p))).join('<br>')+'</div>';
   }
   return h;
@@ -542,9 +642,19 @@ function gmHTML(){
   h+='<div class="phasebar">'+PHASES.map((p,i)=>'<span class="'+(i===idx?'on':(i<idx?'done':''))+'">'+PHLBL[p]+'</span>').join('')+'</div>';
   if(S.phase==='trading'){
     const n=Object.keys(S.trades||{}).filter(pid=>Object.keys(S.trades[pid]||{}).length>0).length;
-    h+='<div class="card"><h3>Trading phase</h3><div class="muted">'+n+' / '+S.players.length+' players have entered trades.</div>'+
-    '<div class="btnrow"><button class="btn ghost" onclick="genMM()">🎲 Regenerate market-maker tabs</button>'+
-    '<button class="btn ok" onclick="lockResolve()">🔒 Lock &amp; Resolve Orders</button></div></div>';
+    const t=S.tradeTimer;
+    h+='<div class="card"><h3>🔄 Tab Placement</h3><div class="muted">'+n+' / '+S.players.length+' players have placed tabs.</div>';
+    if(t) h+='<div style="text-align:center;font-size:30px;margin:8px 0;">⏱️ <span id="tcount"></span></div>';
+    h+='<label class="lbl">Tab timer (seconds)</label><div class="stepper"><input id="timerDur" value="'+(S.timerDur||60)+'" inputmode="numeric" style="width:90px;">'+
+      '<button class="btn ghost" style="min-height:48px;margin:0;" onclick="setTimerDur($(\'timerDur\').value)">Set</button></div>';
+    h+='<div class="btnrow" style="margin-top:8px;">'+(t?'':'<button class="btn" onclick="startTimer()">⏱️ Start '+(S.timerDur||60)+'s timer</button>')+
+      '<button class="btn ok" onclick="lockTabs()">🔒 Lock tabs</button></div>';
+    h+='<div class="btnrow"><button class="btn ghost" onclick="genMM()">🎲 Regenerate market-maker tabs</button></div></div>';
+  }else if(S.phase==='execute'){
+    const n=Object.keys(S.trades||{}).filter(pid=>Object.keys(S.trades[pid]||{}).some(a=>S.trades[pid][a].qty>0)).length;
+    h+='<div class="card"><h3>📝 Quantity Phase</h3><div class="muted">'+n+' / '+S.players.length+' players have announced quantities.</div>'+
+    '<div class="btnrow"><button class="btn ok" onclick="runExecute()">⚙️ Check funding &amp; execute</button></div></div>';
+    h+=auctionHTML();
   }else if(S.phase==='event'){
     h+='<div class="card"><h3>🎲 Random Event — 1d12 (12 triggers)</h3>';
     if(!ruleOn('randevents')){
@@ -617,8 +727,7 @@ const $=id=>document.getElementById(id);
 let S=null;
 let ui={tab:'board',tradePid:null};
 let NET={code:null,token:null,playerId:null,host:false};
-let draft={trades:{},cashAct:{}};
-let draftPid=null, draftErr={}, draftCashErr={};
+let ui_auctionPid=null;
 const SESKEY='smg-net-v1';
 
 function saveSes(){ try{localStorage.setItem(SESKEY,JSON.stringify(NET));}catch(e){} }
@@ -638,91 +747,80 @@ function connect(){
   EV.onmessage=e=>{ try{const o=JSON.parse(e.data); if(o.state){S=o.state; render();}}catch(err){} };
 }
 
-/* ----- draft trades (local until submitted) ----- */
-function ensureDraft(pid){
-  if(draftPid!==pid||!draft){
-    draftPid=pid;
-    draft={trades:JSON.parse(JSON.stringify((S.trades&&S.trades[pid])||{})),cashAct:JSON.parse(JSON.stringify((S.cashAct&&S.cashAct[pid])||{}))};
-    draftErr={}; draftCashErr={};
-  }
+/* ----- tabs (live) + quantity draft ----- */
+function toggleTab(pid,asset,action){
+  if(!S||S.phase!=='trading') return;
+  const tabs={};
+  ASSETS.forEach(a=>{ const e=((S.trades||{})[pid]||{})[a]; if(e&&e.action) tabs[a]=e.action; });
+  const cur=tabs[asset];
+  if(cur===action) delete tabs[asset]; else tabs[asset]=action;
+  api('submitTabs',{pid:pid,tabs:tabs}).then(o=>{ if(o&&o.errs&&o.errs.length) alert(o.errs.join('\n')); });
 }
+let qtyDraft=null, qtyPid=null;
 function defaultQty(a){ return a==='bond'?1:10; }
-function setTrade(pid,asset,action){
-  if(!S||S.phase!=='trading') return;
-  ensureDraft(pid);
-  const cur=draft.trades[asset];
-  if(cur&&cur.action===action){ delete draft.trades[asset]; }
-  else{
-    const qty=(cur&&cur.qty)||defaultQty(asset);
-    const err=tradeError(pid,asset,action,qty);
-    if(err){ draftErr[pid+asset]=err; }
-    else{ delete draftErr[pid+asset]; draft.trades[asset]={action:action,qty:qty}; }
+function ensureQtyDraft(pid){
+  if(qtyPid!==pid||!qtyDraft){
+    qtyPid=pid; qtyDraft={trades:{},cashAct:{repay:0,addC:0,relC:0}};
+    const tr=(S.trades&&S.trades[pid])||{};
+    ASSETS.forEach(a=>{ if(tr[a]&&tr[a].action) qtyDraft.trades[a]={action:tr[a].action,qty:tr[a].qty>0?tr[a].qty:defaultQty(a)}; });
+    const ca=(S.cashAct&&S.cashAct[pid])||{};
+    ['repay','addC','relC'].forEach(k=>{ qtyDraft.cashAct[k]=ca[k]||0; });
   }
-  render();
 }
-function setQty(pid,asset,delta){
-  if(!S||S.phase!=='trading') return;
-  ensureDraft(pid);
-  const cur=draft.trades[asset]; if(!cur) return;
-  let q=cur.qty+delta; if(q<1) q=1;
-  const err=tradeError(pid,asset,cur.action,q);
-  if(err){ draftErr[pid+asset]=err; } else { delete draftErr[pid+asset]; cur.qty=q; }
-  render();
+function chQty(pid,a,delta){
+  if(!S||S.phase!=='execute') return;
+  ensureQtyDraft(pid);
+  if(!qtyDraft.trades[a]) return;
+  const step=a==='bond'?1:10; // stocks/warrants trade in lots of 10
+  let q=qtyDraft.trades[a].qty+delta*step; if(q<0) q=0;
+  qtyDraft.trades[a].qty=q; render();
 }
-function setQtyDirect(pid,asset,val){
-  if(!S||S.phase!=='trading') return;
-  const q=parseInt(val,10); ensureDraft(pid);
-  const cur=draft.trades[asset]; if(!cur||!(q>0)) return;
-  const err=tradeError(pid,asset,cur.action,q);
-  if(err){ draftErr[pid+asset]=err; } else { delete draftErr[pid+asset]; cur.qty=q; }
-  render();
+function setQtyVal(pid,a,val){
+  if(!S||S.phase!=='execute') return;
+  ensureQtyDraft(pid);
+  if(!qtyDraft.trades[a]) return;
+  const q=parseInt(val,10);
+  qtyDraft.trades[a].qty=(!(q>=0))?0:q; render();
 }
-function setCashAct(pid,kind,val){
-  if(!S||S.phase!=='trading') return;
-  ensureDraft(pid);
-  const p=player(pid); const v=Math.max(0,Math.round(Number(val)||0));
-  let err=null;
-  if(kind==='repay'&&v>Math.min(p.loan||0,p.cash)) err='Cannot repay more than loan/cash.';
-  if(kind==='addC'&&v>p.cash) err='Not enough cash.';
-  if(kind==='relC'&&v>shortExcess(p)) err='Release would breach collateral requirement.';
-  draft.cashAct[kind]=v; draftCashErr[pid+kind]=err;
-  render();
+function setQtyCash(pid,kind,val){
+  if(!S||S.phase!=='execute') return;
+  ensureQtyDraft(pid);
+  qtyDraft.cashAct[kind]=Math.max(0,Math.round(Number(val)||0)); render();
 }
-function clearDraft(){ draft={trades:{},cashAct:{}}; draftErr={}; draftCashErr={}; render(); }
-function submitDraft(pid){
-  pid=pid||draftPid;
-  if(!pid) return;
-  api('submitTrades',{pid:pid,trades:draft.trades,cashAct:draft.cashAct}).then(o=>{
-    if(o&&o.ok){ draftPid=null; draft={trades:{},cashAct:{}}; draftErr={}; draftCashErr={}; }
-    if(o&&o.errs&&o.errs.length) alert('Some trades rejected:\n'+o.errs.join('\n'));
+function submitQty(pid){
+  if(!S||S.phase!=='execute') return;
+  ensureQtyDraft(pid);
+  const t={};
+  Object.keys(qtyDraft.trades).forEach(a=>{ const e=qtyDraft.trades[a]; if(e&&e.action) t[a]={action:e.action,qty:e.qty||0}; });
+  api('submitQty',{pid:pid,trades:t,cashAct:qtyDraft.cashAct}).then(o=>{
+    if(o&&o.ok){ qtyPid=null; qtyDraft=null; }
+    if(o&&o.errs&&o.errs.length) alert('Some quantities rejected:\n'+o.errs.join('\n'));
   });
 }
 
 /* ----- host actions -> server ----- */
-function lockResolve(){ if(confirm('Lock trading and resolve all orders for round '+S.round+'?')) api('lockResolve'); }
+function setTimerDur(v){ api('setTimerDur',{sec:v}); }
+function startTimer(){ api('startTimer'); }
+function lockTabs(){ if(confirm('Lock tabs and move to quantities?')) api('lockTabs'); }
+function runExecute(){ api('runExecute').then(o=>{ if(o&&o.shortfalls) alert('Funding shortfalls \u2014 see the auction panel.'); }); }
+function openAuction(pid){ const as=$('aucAsset'), qs=$('aucQty'); if(!as||!qs) return; api('openAuction',{pid:pid,asset:as.value,qty:qs.value}).then(o=>{ if(o&&!o.ok) alert(o.err); }); }
+function closeAuction(){ api('closeAuction'); }
+function placeBid(){ const el=$('bidAmt'); if(!el) return; api('placeBid',{amount:el.value}); }
+function recordLoan(){ api('recordLoan',{lender:$('loanL').value,borrower:$('loanB').value,amount:$('loanAmt').value}).then(o=>{ if(o&&!o.ok) alert(o.err); }); }
+function bankrupt(pid){ const p=player(pid); if(confirm('Bankrupt '+(p?p.name:'?')+'? They are out of the game.')) api('bankrupt',{pid:pid}); }
 function rollD12(){ api('rollD12'); }
-function setRegime(r){ api('setRegime',{regime:r}); }
-function flipTrend(){ api('flipTrend'); }
-function confirmMoves(){ api('confirmMoves'); }
-function rollFireSale(ix){ api('rollFireSale',{ix:ix}); }
-function setFireBuyer(ix,v){ api('setFireBuyer',{ix:ix,buyerId:v}); }
-function setFireBuyerQty(ix,v){ api('setFireBuyerQty',{ix:ix,qty:v}); }
-function confirmFireSale(){ api('confirmFireSale'); }
-function bubbleStep(){ api('bubbleStep'); }
-function drawBubble(){ api('drawBubble'); }
-function endRound(){ api('endRound'); }
-function genMM(){ api('genMM'); }
-
 function explainerHTML(){
-  return '<div class="explainer"><b>📲 Live game:</b> your trades sync instantly to the host board when you hit Submit. No codes needed.</div>';
+  return '<div class="explainer"><b>📲 Live game:</b> place buy/sell tabs during the timer — exact quantities are announced after. Tabs sync instantly.</div>';
 }
 function submittedHTML(){
   const ids=Object.keys(S.trades||{}).filter(pid=>Object.keys(S.trades[pid]||{}).length>0);
-  let h='<div class="card"><h3>📥 Submitted trades ('+ids.length+'/'+S.players.length+')</h3>';
+  const isExec=S.phase==='execute';
+  let h='<div class="card"><h3>📥 '+(isExec?'Announced quantities':'Placed tabs')+' ('+ids.length+'/'+S.players.length+')</h3>';
   if(!ids.length) h+='<span class="muted">Waiting for players…</span>';
   h+=ids.map(pid=>{ const p=player(pid); const tr=S.trades[pid];
-    return '<div class="small" style="padding:5px 0;border-bottom:1px solid var(--line)"><b>'+esc(p?p.name:'?')+'</b>: '+
-      Object.keys(tr).map(a=>tr[a].action+' '+tr[a].qty+' '+ASH[a]).join(', ')+'</div>'; }).join('');
+    const parts=Object.keys(tr).map(a=>{ const e=tr[a]; return isExec?(e.action+' '+(e.qty||0)+' '+ASH[a]):(e.action.toUpperCase()+' '+ASH[a]); });
+    return '<div class="small" style="padding:5px 0;border-bottom:1px solid var(--line)"><b>'+esc(p?p.name:'?')+'</b>'+(p&&p.out?' ☠️':'')+': '+
+      parts.join(', ')+'</div>'; }).join('');
   return h+'</div>';
 }
 
@@ -853,6 +951,17 @@ function setTabs(tabs){
 
 /* ----- init ----- */
 loadSes();
+/* live countdowns for the tab timer and auctions (display only; server is authoritative) */
+setInterval(()=>{
+  if(S&&S.phase==='trading'&&S.tradeTimer){
+    const el=document.getElementById('tcount');
+    if(el){ const s=Math.max(0,Math.ceil((S.tradeTimer.endsAt-Date.now())/1000)); el.textContent='0:'+String(s).padStart(2,'0'); }
+  }
+  if(S&&S.auction){
+    const el=document.getElementById('acount');
+    if(el){ const s=Math.max(0,Math.ceil((S.auction.endsAt-Date.now())/1000)); el.textContent=s>0?('0:'+String(s).padStart(2,'0')+' left'):'closing…'; }
+  }
+},1000);
 if(NET.code&&NET.token){
   fetch('/api/rejoin',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({code:NET.code,token:NET.token})}).then(r=>r.json()).then(o=>{

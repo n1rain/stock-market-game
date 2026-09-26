@@ -21,6 +21,7 @@ function rid(n) {
 }
 function persist() {
   try {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     const slim = {};
     Object.keys(rooms).forEach(k => {
       slim[k] = { state: rooms[k].state, hostToken: rooms[k].hostToken, tokens: rooms[k].tokens };
@@ -37,16 +38,24 @@ function restore() {
   } catch (e) { console.log('restore failed', e.message); }
 }
 // hide the exact bubble threshold from non-host clients
-function publicState(room, isHost) {
+function publicState(room, isHost, playerId) {
   if (isHost) return room.state;
   const s = Object.assign({}, room.state, { bubbleThreshold: null });
+  if (s.phase === 'trading' && playerId) {
+    // while tabs are being placed, a player sees only their own — not others' tabs
+    const mine = {};
+    if (s.trades && s.trades[playerId]) mine[playerId] = s.trades[playerId];
+    s.trades = mine;
+  }
   return s;
 }
 function broadcast(room) {
   const payloadHost = 'data: ' + JSON.stringify({ state: publicState(room, true) }) + '\n\n';
-  const payloadPlayer = 'data: ' + JSON.stringify({ state: publicState(room, false) }) + '\n\n';
   room.clients.forEach(c => {
-    try { c.res.write(c.isHost ? payloadHost : payloadPlayer); } catch (e) {}
+    try {
+      c.res.write(c.isHost ? payloadHost
+        : 'data: ' + JSON.stringify({ state: publicState(room, false, c.playerId) }) + '\n\n');
+    } catch (e) {}
   });
 }
 function withState(room, fn) {
@@ -71,8 +80,70 @@ function readBody(req) {
 }
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' };
 
-const HOST_ACTIONS = new Set(['lockResolve','rollD12','setRegime','confirmMoves','rollFireSale','setFireBuyer',
+const HOST_ACTIONS = new Set(['setTimerDur','startTimer','lockTabs','runExecute','openAuction','closeAuction','recordLoan','bankrupt',
+  'rollD12','setRegime','confirmMoves','rollFireSale','setFireBuyer',
   'setFireBuyerQty','confirmFireSale','bubbleStep','drawBubble','endRound','genMM','setRule','setBubbleRange','setPhase','flipTrend']);
+// per-room server-side timers (tab countdown, auction countdown)
+const roomTimers = {};
+function clearRoomTimer(code, kind) {
+  const t = roomTimers[code];
+  if (t && t[kind]) { clearTimeout(t[kind]); t[kind] = null; }
+}
+function scheduleTradeTimer(code) {
+  clearRoomTimer(code, 'trade');
+  const r = rooms[code];
+  if (!r || !r.state.tradeTimer) return;
+  const ms = r.state.tradeTimer.endsAt - Date.now();
+  roomTimers[code] = roomTimers[code] || {};
+  if (ms <= 0) { // expired while the server was down — lock immediately
+    roomTimers[code].trade = null;
+    withState(r, () => game.lockTabs(true));
+    persist(); broadcast(r);
+    return;
+  }
+  roomTimers[code].trade = setTimeout(() => {
+    roomTimers[code].trade = null;
+    const r2 = rooms[code];
+    if (!r2 || r2.state.phase !== 'trading' || !r2.state.tradeTimer) return;
+    withState(r2, () => game.lockTabs(true));
+    persist(); broadcast(r2);
+  }, ms + 500);
+}
+function scheduleAuctionTimer(code) {
+  clearRoomTimer(code, 'auction');
+  const r = rooms[code];
+  if (!r || !r.state.auction) return;
+  const ms = r.state.auction.endsAt - Date.now();
+  roomTimers[code] = roomTimers[code] || {};
+  if (ms <= 0) { // expired while the server was down — close immediately
+    roomTimers[code].auction = null;
+    withState(r, () => game.closeAuction());
+    persist(); broadcast(r);
+    return;
+  }
+  roomTimers[code].auction = setTimeout(() => {
+    roomTimers[code].auction = null;
+    const r2 = rooms[code];
+    if (!r2 || !r2.state.auction) return;
+    withState(r2, () => game.closeAuction());
+    persist(); broadcast(r2);
+  }, ms + 500);
+}
+// settle timers that expired while the server was down; call on startup and on each request
+function settleExpiredTimers(room) {
+  let changed = false;
+  withState(room, () => {
+    const s = game.getS();
+    if (s.phase === 'trading' && s.tradeTimer && Date.now() > s.tradeTimer.endsAt) {
+      game.lockTabs(true); changed = true;
+    }
+    if (s.auction && Date.now() > s.auction.endsAt) {
+      game.closeAuction(); changed = true;
+    }
+  });
+  if (changed) { persist(); broadcast(room); }
+  return changed;
+}
 
 async function handleApi(req, res, url) {
   const body = await readBody(req);
@@ -118,14 +189,14 @@ async function handleApi(req, res, url) {
     const token = rid(16);
     room.tokens[token] = { playerId: p.id };
     persist(); broadcast(room);
-    return send({ ok: true, playerId: p.id, playerToken: token, state: publicState(room, false) });
+    return send({ ok: true, playerId: p.id, playerToken: token, state: publicState(room, false, p.id) });
   }
 
   if (url.pathname === '/api/rejoin' && req.method === 'POST') {
     if (!room) return send({ ok: false, err: 'Game not found.' });
     const a = auth(room, body.token);
     if (!a) return send({ ok: false, err: 'Session expired. Rejoin with the code.' });
-    return send({ ok: true, host: !!a.host, playerId: a.playerId || null, state: publicState(room, !!a.host) });
+    return send({ ok: true, host: !!a.host, playerId: a.playerId || null, state: publicState(room, !!a.host, a.playerId) });
   }
 
   if (url.pathname === '/api/backup' && req.method === 'POST') {
@@ -139,20 +210,76 @@ async function handleApi(req, res, url) {
     if (!room) return send({ ok: false, err: 'Game not found.' });
     const a = auth(room, body.token);
     if (!a) return send({ ok: false, err: 'Session expired.' });
+    settleExpiredTimers(room); // recover timers that lapsed while the server was down
     const action = body.action;
     try {
       let result = { ok: true };
-      if (action === 'submitTrades') {
+      if (action === 'submitTabs') {
         const pid = a.host ? (body.pid || null) : a.playerId;
         if (!pid) return send({ ok: false, err: 'Unknown player.' });
-        if (room.state.phase !== 'trading') return send({ ok: false, err: 'Trading is locked.' });
-        const errs = withState(room, () => game.submitTrades(pid, body.trades || {}, body.cashAct || {}));
+        if (room.state.phase !== 'trading') return send({ ok: false, err: 'Tab placement is closed.' });
+        const tt = room.state.tradeTimer;
+        if (!tt || Date.now() > tt.endsAt) return send({ ok: false, err: 'The broker hasn\u2019t started the tab timer yet.' });
+        const errs = withState(room, () => game.submitTabs(pid, body.tabs || {}));
         result.errs = errs;
+      } else if (action === 'submitQty') {
+        const pid = a.host ? (body.pid || null) : a.playerId;
+        if (!pid) return send({ ok: false, err: 'Unknown player.' });
+        if (room.state.phase !== 'execute') return send({ ok: false, err: 'Not in the quantity phase.' });
+        const errs = withState(room, () => game.submitQty(pid, body.trades || {}, body.cashAct || {}));
+        result.errs = errs;
+      } else if (action === 'placeBid') {
+        if (a.host) return send({ ok: false, err: 'Players only.' });
+        if (room.state.phase !== 'execute') return send({ ok: false, err: 'No auction right now.' });
+        const err = withState(room, () => game.placeBid(a.playerId, body.amount));
+        if (err) return send({ ok: false, err: err });
       } else if (HOST_ACTIONS.has(action)) {
         if (!a.host) return send({ ok: false, err: 'Host only.' });
+        let actionErr = null;
         withState(room, () => {
           switch (action) {
-            case 'lockResolve': game.lockResolve(); break;
+            case 'setTimerDur': game.setTimerDur(body.sec); break;
+            case 'startTimer': {
+              if (game.getS().phase !== 'trading') { actionErr = 'Not in the tab phase.'; break; }
+              game.startTradeTimer();
+              scheduleTradeTimer(code);
+              break;
+            }
+            case 'lockTabs':
+              if (game.getS().phase !== 'trading') { actionErr = 'Not in the tab phase.'; break; }
+              clearRoomTimer(code, 'trade');
+              game.lockTabs(false);
+              break;
+            case 'runExecute': {
+              if (game.getS().phase !== 'execute') { actionErr = 'Not in the execute phase.'; break; }
+              const r = game.runExecute();
+              if (r.error) actionErr = r.error;
+              else if (r.shortfalls) result.shortfalls = r.shortfalls;
+              else result.executed = true;
+              break;
+            }
+            case 'openAuction': {
+              const err = game.openAuction(body.pid, body.asset, body.qty);
+              if (err) { actionErr = err; break; }
+              scheduleAuctionTimer(code);
+              break;
+            }
+            case 'closeAuction':
+              clearRoomTimer(code, 'auction');
+              result.auction = game.closeAuction();
+              break;
+            case 'recordLoan': {
+              const err = game.recordLoan(body.lender, body.borrower, body.amount);
+              if (err) actionErr = err;
+              break;
+            }
+            case 'bankrupt': {
+              if (game.getS().phase !== 'execute') { actionErr = 'Not in the execute phase.'; break; }
+              const err = game.bankrupt(body.pid);
+              if (err) actionErr = err;
+              else clearRoomTimer(code, 'auction');
+              break;
+            }
             case 'rollD12': game.rollD12(); break;
             case 'setRegime': game.setRegime(body.regime); break;
             case 'confirmMoves': game.confirmMoves(); break;
@@ -170,11 +297,12 @@ async function handleApi(req, res, url) {
             case 'setPhase': if (game.PHASES.indexOf(body.phase) >= 0) { game.getS().phase = body.phase; } break;
           }
         });
+        if (actionErr) return send({ ok: false, err: actionErr });
       } else {
         return send({ ok: false, err: 'Unknown action.' });
       }
       persist(); broadcast(room);
-      result.state = publicState(room, !!a.host);
+      result.state = publicState(room, !!a.host, a.playerId);
       return send(result);
     } catch (e) {
       console.log('action error', action, e.message);
@@ -208,9 +336,9 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
       'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'
     });
-    const client = { res: res, isHost: !!a.host };
+    const client = { res: res, isHost: !!a.host, playerId: a.playerId || null };
     room.clients.add(client);
-    res.write('data: ' + JSON.stringify({ state: publicState(room, !!a.host) }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ state: publicState(room, !!a.host, a.playerId) }) + '\n\n');
     const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 25000);
     req.on('close', () => { clearInterval(hb); room.clients.delete(client); });
     return;
@@ -220,4 +348,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 restore();
+// re-arm server-side timers for rooms that were live across the restart
+Object.keys(rooms).forEach(code => {
+  const r = rooms[code];
+  if (r.state.phase === 'trading' && r.state.tradeTimer) scheduleTradeTimer(code);
+  else if (r.state.auction) scheduleAuctionTimer(code);
+});
 server.listen(PORT, () => console.log('SMG server on :' + PORT));

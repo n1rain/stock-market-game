@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: stock-market-game
+    env: docker
+    plan: free
+    healthCheckPath: /

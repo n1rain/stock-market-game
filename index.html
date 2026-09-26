@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Stock Market Game Tracker</title>
+<style>
+:root{
+  --bg:#0f172a; --card:#1e293b; --card2:#243449; --line:#334155;
+  --txt:#e2e8f0; --dim:#94a3b8; --acc:#38bdf8; --buy:#22c55e; --sell:#ef4444;
+  --warn:#f59e0b; --bad:#f87171; --good:#4ade80;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:15px; line-height:1.4;}
+header{position:sticky;top:0;z-index:50;background:#0b1220;border-bottom:1px solid var(--line);
+  padding:10px 12px;}
+header .row1{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+header h1{font-size:17px;margin:0;letter-spacing:.3px;}
+header .sub{font-size:12px;color:var(--dim);margin-top:2px;}
+.pill{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:20px;
+  padding:3px 10px;font-size:12px;margin:2px 2px 0 0;}
+.pill.hot{background:#7c2d12;border-color:#c2410c;color:#fdba74;}
+.pill.bub{background:#581c87;border-color:#9333ea;color:#d8b4fe;}
+nav.tabs{position:sticky;top:64px;z-index:49;background:#0b1220;display:flex;overflow-x:auto;
+  border-bottom:1px solid var(--line);padding:0 6px;}
+nav.tabs button{flex:0 0 auto;background:none;border:none;color:var(--dim);font-size:14px;
+  padding:12px 14px;border-bottom:3px solid transparent;cursor:pointer;min-height:48px;}
+nav.tabs button.on{color:var(--txt);border-bottom-color:var(--acc);font-weight:600;}
+main{padding:12px 12px 90px;max-width:900px;margin:0 auto;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:12px;margin-bottom:12px;}
+.card h3{margin:0 0 8px;font-size:15px;}
+.muted{color:var(--dim);font-size:13px;}
+.small{font-size:12px;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);}
+th:first-child,td:first-child{text-align:left;}
+th{color:var(--dim);font-weight:600;font-size:12px;}
+.num{font-variant-numeric:tabular-nums;}
+.up{color:var(--good);} .down{color:var(--bad);} .flat{color:var(--dim);}
+.btn{display:inline-block;background:var(--acc);color:#06202e;border:none;border-radius:10px;
+  padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px;margin:4px 4px 4px 0;}
+.btn:active{transform:scale(.97);}
+.btn.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line);}
+.btn.danger{background:#7f1d1d;color:#fecaca;}
+.btn.ok{background:var(--buy);color:#052e12;}
+.btn.warnb{background:var(--warn);color:#451a03;}
+.btn:disabled{opacity:.4;}
+.btnrow{display:flex;flex-wrap:wrap;gap:2px;}
+.abtn{flex:1 1 0;background:var(--card2);color:var(--txt);border:2px solid var(--line);
+  border-radius:10px;padding:12px 4px;font-size:13px;font-weight:700;cursor:pointer;
+  min-height:52px;min-width:60px;}
+.abtn.sel-buy{border-color:var(--buy);background:#052e16;color:var(--good);}
+.abtn.sel-sell{border-color:var(--sell);background:#450a0a;color:var(--bad);}
+.abtn.sel{border-color:var(--acc);background:#0c2a3f;color:var(--acc);}
+.stepper{display:flex;align-items:center;gap:6px;}
+.stepper button{width:48px;height:48px;font-size:22px;border-radius:10px;border:1px solid var(--line);
+  background:var(--card2);color:var(--txt);}
+.stepper input{width:64px;height:48px;font-size:17px;text-align:center;border-radius:10px;
+  border:1px solid var(--line);background:#0b1220;color:var(--txt);}
+select,input[type=text],textarea{background:#0b1220;color:var(--txt);border:1px solid var(--line);
+  border-radius:10px;padding:11px;font-size:15px;width:100%;}
+textarea{min-height:90px;font-family:monospace;font-size:13px;}
+label.lbl{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px;}
+.err{color:var(--bad);font-size:13px;margin-top:6px;font-weight:600;}
+.feed div{padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;}
+.feed .fr{color:var(--dim);font-size:11px;}
+.gauge{display:flex;align-items:center;gap:8px;margin:6px 0;}
+.gbar{flex:1;height:14px;background:#0b1220;border-radius:8px;position:relative;overflow:hidden;border:1px solid var(--line);}
+.gfill{position:absolute;top:0;bottom:0;border-radius:8px;}
+.trow{display:flex;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);}
+.trow:last-child{border-bottom:none;}
+.tinfo{flex:1 1 40%;}
+.tinfo .pn{font-weight:700;}
+.tinfo .pp{font-size:12px;color:var(--dim);}
+.tact{flex:1 1 60%;}
+.kv{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;}
+.kv b{font-variant-numeric:tabular-nums;}
+details{margin-top:8px;}
+summary{cursor:pointer;color:var(--acc);font-size:13px;padding:8px 0;min-height:44px;}
+.flag{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px;margin-left:6px;}
+.flag.mc{background:#7f1d1d;color:#fecaca;}
+.flag.cc{background:#78350f;color:#fde68a;}
+.phasebar{display:flex;overflow-x:auto;gap:4px;margin-bottom:10px;}
+.phasebar span{flex:0 0 auto;font-size:11px;padding:6px 10px;border-radius:16px;background:var(--card2);
+  color:var(--dim);border:1px solid var(--line);}
+.phasebar span.on{background:var(--acc);color:#06202e;font-weight:800;border-color:var(--acc);}
+.phasebar span.done{background:#052e16;color:var(--good);border-color:#166534;}
+h2.st{font-size:18px;margin:4px 0 12px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+@media(max-width:520px){.grid2{grid-template-columns:1fr 1fr;}}
+.explainer{background:#0c2a3f;border:1px solid #155e75;border-radius:12px;padding:12px;margin-bottom:12px;font-size:13px;}
+.explainer b{color:var(--acc);}
+code.code{background:#0b1220;border:1px solid var(--line);border-radius:6px;padding:2px 6px;
+  font-size:12px;word-break:break-all;}
+.die{display:inline-block;width:52px;height:52px;line-height:52px;text-align:center;font-size:26px;
+  font-weight:800;background:var(--card2);border:2px solid var(--acc);border-radius:12px;margin:6px;}
+.evcard{background:#2a1a3e;border:1px solid #7c3aed;border-radius:12px;padding:12px;margin:10px 0;}
+.evcard h4{margin:0 0 6px;color:#d8b4fe;}
+.standings td,.standings th{font-size:12px;padding:6px 4px;}
+canvas.chart{width:100%;height:220px;background:#0b1220;border:1px solid var(--line);border-radius:12px;}
+.rolebar{display:flex;gap:6px;align-items:center;}
+.rolebar select{width:auto;flex:1;}
+</style>
+</head>
+<body>
+<header>
+  <div class="row1">
+    <div>
+      <h1 id="hdrTitle">📈 Stock Market Game</h1>
+      <div class="sub" id="hdrSub">No game loaded</div>
+    </div>
+    <div class="rolebar">
+      <span id="roleLbl" class="muted" style="font-size:13px;"></span>
+    </div>
+  </div>
+  <div id="hdrPills" style="margin-top:6px;"></div>
+</header>
+<nav class="tabs" id="tabBar"></nav>
+<main id="app"></main>
+<script>
+/* ================= CONSTANTS ================= */
+const ASSETS=['bc','spec','pref','bond','warr'];
+const ANAME={bc:'Blue Chip',spec:'Speculative',pref:'Preferred',bond:'Bonds',warr:'Warrants'};
+const ASH={bc:'BC',spec:'SPEC',pref:'PF',bond:'BOND',warr:'WARR'};
+const APER={bc:1,spec:1,pref:1,bond:10,warr:1};           // $ per quote point
+const STARTP={bc:40,spec:20,pref:50,bond:90,warr:5};      // starting quotes
+const MOVE={
+ bull:{bc:[14,11,8,6,4,2],spec:[44,22,10,4,0,-2],pref:[10,8,6,4,2,0],bond:[28,22,16,12,8,4],warr:[8,5,3,2,1,0]},
+ mixed:{bc:[7,6,4,0,-2,-4],spec:[20,10,5,0,-6,-15],pref:[6,4,2,0,-1,-3],bond:[14,12,8,0,-4,-8],warr:[4,2,1,0,-1,-3]},
+ bear:{bc:[-2,-3,-5,-7,-10,-13],spec:[-4,-7,-11,-16,-22,-50],pref:[0,-1,-2,-3,-5,-7],bond:[-4,-6,-10,-14,-20,-26],warr:[-1,-1,-2,-2,-4,-8]}};
+const MOMMOD={bc:[0,0,1,2,4],spec:[0,2,5,10,18],pref:[0,0,1,3,5],bond:[0,0,2,4,8],warr:[0,1,3,6,10]};
+const DIRA={buy:'buy',marginbuy:'buy',cover:'buy',exercise:'buy',sell:'sell',short:'sell'};
+const PHASES=['trading','resolve','event','market','moves','firesale','bubble','endround'];
+const PHLBL={trading:'Trading',resolve:'Resolve',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
+function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
+function colFor(net){ if(net>=3)return 0; if(net===2)return 1; if(net===1)return 2; if(net===0)return 3; if(net===-1)return 4; return 5; }
+const COLN=['Buy 3+','Buy 2','Buy 1','Sell 0','Sell 1','Sell 2+'];
+/* ================= HOUSE RULES ================= */
+const RULES=[
+ ['splits','Stock splits','BC ≥ 80 and Spec ≥ 100 split 2-for-1; conversion ratios adjust.'],
+ ['warrants','Warrant exercise','Exercise warrants into Speculative shares.'],
+ ['warrant_decay','Warrant decay','Warrants lose 1 quote point at end of round when Spec doesn\'t rise.'],
+ ['margin','Margin buying','50% cash / 50% loan with maintenance calls.'],
+ ['short','Short selling','New shorts need 50% collateral held. Covering always allowed.'],
+ ['firesale','Fire sales','Discounted execution when selling is crowded.'],
+ ['momentum','Momentum tracker','−4…+4 regime tracker that modifies price moves.'],
+ ['bubble','Bubble indicator','Bubble score, threshold, and bubble event decks.'],
+ ['randomBubble','Random bubble threshold','Each game rolls a hidden threshold between N and N+8 by player count (6–14 standard).'],
+ ['randevents','Random events','1d12 roll each round with the 15-card event deck.'],
+ ['pflow','Persistent flow','Imbalance tabs carry into the next round.'],
+ ['mmtabs','Market-maker tabs','Auto random tabs for 4–5 player games.'],
+ ['conversions','Conversions','Preferred → Blue Chip and Bond → Blue Chip.']
+];
+function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=true); return o; }
+function ruleOn(k){ return (S&&S.rules)?!!S.rules[k]:true; }
+
+/* ================= EVENT DECKS ================= */
+const RANDEVENTS=[
+ {n:'Emergency Rate Cuts',m:{bc:8,pref:6,bond:10,spec:6,warr:2},d:'Momentum +1.',fx:'mom1'},
+ {n:'Index Inclusion',m:{bc:6,pref:4,spec:2,warr:1},d:'Next round: +2 Buy tabs on Blue Chip and Preferred.',fx:'idxin'},
+ {n:'Short Covering Rally',m:{bc:4,pref:2,spec:16,warr:6},d:'ALL open shorts forced-cover at current prices.',fx:'allcover'},
+ {n:'Sovereign Rescue Package',m:{bc:10,pref:8,bond:6,spec:4,warr:2},d:'Bubble −2.',fx:'bubm2'},
+ {n:'Foreign Investment Surge',m:{bc:8,pref:6,bond:4,spec:8,warr:3},d:'Bubble +2. Double market-maker tabs next round.',fx:'surge'},
+ {n:'Presidential Tariffs',m:{bc:-10,pref:-8,bond:-4,spec:-14,warr:-4},d:'No special rule.'},
+ {n:'Volatility Spike',m:{warr:6},d:'Roll d6: odd → Spec −10, even → Spec +10. Bubble +2.',fx:'vol'},
+ {n:'Banking Crisis',m:{bc:-12,pref:-14,bond:8,spec:-18,warr:-6},d:'No new Margin Buys next round.',fx:'nomargin'},
+ {n:'Flash Crash',m:{bc:-8,pref:-10,bond:2,spec:-22,warr:-8},d:'Next round Fire Sale: 30% roll / 50% automatic.',fx:'flash'},
+ {n:'Index Deletion',m:{bc:-8,pref:-6,bond:2,spec:-2,warr:-1},d:'Next round: +2 Sell tabs on Blue Chip and Preferred.',fx:'idxdel'},
+ {n:'Speculative Options Expiry',m:{},d:'All Warrants expire at end of next round. Bubble −1.',fx:'optexp'},
+ {n:'Bubble Psychology Shift',m:{},d:'Bubble +3. Momentum +1.',fx:'psych'},
+ {n:'Rumor of War',m:{bc:-6,pref:-6,bond:4,spec:-10,warr:-4},d:'Next round: d6 follow-up (1–3 recovery, 4–5 none, 6 escalation).',fx:'war'},
+ {n:'Institutional Rotation',m:{},d:'Roll d6 for outcome. Next round Bubble cannot increase.',fx:'rotation'},
+ {n:'Media Frenzy',m:{},d:'Next 2 rounds: two d12 Random Event rolls.',fx:'media'}
+];
+const BUBBLE_DECKS={
+ bull:[
+  {n:'Government Buyout',m:{bc:10,pref:6,bond:4,spec:4,warr:2},d:'All Blue Chip shorts must cover.',fx:'bccover'},
+  {n:'Retail Frenzy',m:{bc:2,bond:-8,spec:20,warr:6},d:'Bubble +1.',fx:'bubp1'},
+  {n:'Productivity Boom',m:{bc:8,pref:5,bond:-6,spec:12,warr:4},d:'Momentum +1.',fx:'mom1'},
+  {n:'Short Squeeze Mania',m:{bc:4,pref:2,spec:22,warr:8},d:'ALL open shorts forced-cover.',fx:'allcover'},
+  {n:'Central Bank Liquidity Flood',m:{bc:10,pref:8,bond:6,spec:14,warr:5},d:'Next round: ignore Fire Sale checks.',fx:'nofire'}],
+ bear:[
+  {n:'Flight to Safety',m:{bc:-8,pref:-10,bond:14,spec:-18,warr:-6},d:'Next round: Bond Buy tabs count double.',fx:'bonddouble'},
+  {n:'Margin Panic',m:{bc:-10,pref:-8,bond:4,spec:-28,warr:-8},d:'Margin loans immediately due.',fx:'panic'},
+  {n:'Credit Freeze',m:{bc:-12,pref:-14,bond:8,spec:-20,warr:-6},d:'No new Margin Buys next round.',fx:'nomargin'},
+  {n:'Inflation Crisis',m:{bc:-18,pref:-20,bond:-6,spec:-26,warr:-8},d:'Each player loses 10% of held cash.',fx:'inflation'},
+  {n:'Systemic Market Collapse',m:{bc:-24,pref:-26,bond:-12,spec:-40,warr:-10},d:'Next round: all Fire Sale checks automatic.',fx:'autofire'}],
+ mixed:[
+  {n:'Sector Rotation',m:{bc:8,pref:10,bond:2,spec:-12,warr:-4},d:'Next round: Spec Buy imbalance does not generate Bubble.',fx:'specnobub'},
+  {n:'Commodity Shock',m:{bc:-4,pref:-6,bond:-14,spec:10,warr:3},d:'No special rule.'},
+  {n:'Uncertain Recovery',m:{bc:4,pref:2,bond:4,spec:-6,warr:-2},d:'Next round: Bubble cannot increase.',fx:'bubfreeze'},
+  {n:'Defensive Rotation',m:{bc:10,pref:12,bond:6,spec:-15,warr:-5},d:'Preferred +2 movement next round.',fx:'pref2'},
+  {n:'Market Exhaustion',m:{bc:-2,pref:4,bond:6,spec:-12,warr:-6},d:'Bubble −1 now. Momentum set to −2 entering next round.',fx:'exhaust'}]
+};
+
+
+function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=true); return o; }
+
+function ruleOn(k){ return (S&&S.rules)?!!S.rules[k]:true; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function fmt(n){ const v=Math.round(n); return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US'); }
+
+function fmtN(n){ return (n>0?'+':'')+n; }
+
+function unitVal(a){ return S.prices[a]*APER[a]; }
+
+function player(pid){ return S.players.find(p=>p.id===pid); }
+
+function longVal(p){ let v=0; ASSETS.forEach(a=>v+=(p.hold[a]||0)*unitVal(a)); return v; }
+
+function shortLiab(p){ let v=0; ASSETS.forEach(a=>v+=(p.short[a]||0)*unitVal(a)); return v; }
+
+function netWorth(p){ return p.cash+longVal(p)+(p.collat||0)-shortLiab(p)-(p.loan||0); }
+
+function marginExcess(p){ return 0.5*longVal(p)-(p.loan||0); }
+
+function shortExcess(p){ return (p.collat||0)-0.5*shortLiab(p); }
+
+function inventory(a){ let l=0,s=0; S.players.forEach(p=>{ l+=(p.hold[a]||0); s+=(p.short[a]||0); }); return S.outstanding[a]-l-s; }
+
+function convRatio(){ return Math.pow(2,S.bcSplits||0); }
+
+function tabCounts(){
+  const t={}; ASSETS.forEach(a=>t[a]={buy:0,sell:0});
+  const add=(a,dir)=>{ if(t[a]&&dir) t[a][dir]++; };
+  (S.tabs.persistent||[]).forEach(x=>add(x.asset,x.dir));
+  (S.tabs.mm||[]).forEach(x=>add(x.asset,x.dir));
+  (S.tabs.sched||[]).forEach(x=>add(x.asset,x.dir));
+  Object.keys(S.trades||{}).forEach(pid=>{
+    const tr=S.trades[pid]||{};
+    ASSETS.forEach(a=>{
+      const e=tr[a]; if(!e||!e.action) return;
+      if(e.action==='exercise'){ add('spec','buy'); return; }
+      const dir=DIRA[e.action]; if(dir) add(a,dir);
+    });
+  });
+  if(S.bondBuyDouble) t.bond.buy*=2;
+  return t;
+}
+
+function netTabs(a){ const t=tabCounts(); return t[a].buy-t[a].sell; }
+
+function tradeError(pid,asset,action,qty){
+  const p=player(pid); if(!p) return 'Unknown player.';
+  if(action==='marginbuy'&&!ruleOn('margin')) return 'Margin buying is disabled (house rules).';
+  if(action==='short'&&!ruleOn('short')) return 'Short selling is disabled (house rules).';
+  if(action==='exercise'&&!ruleOn('warrants')) return 'Warrants are disabled (house rules).';
+  if((action==='convPref'||action==='convBond')&&!ruleOn('conversions')) return 'Conversions are disabled (house rules).';
+  if(!(qty>0)) return 'Enter a quantity above 0.';
+  if(!Number.isInteger(qty)) return 'Whole shares only.';
+  const v=unitVal(asset), hold=p.hold[asset]||0;
+  const tr=S.trades[pid]||{};
+  if(asset==='spec'&&tr.warr&&tr.warr.action==='exercise'&&(action==='sell'||action==='short'))
+    return 'Exercising warrants this round: cannot sell/short Spec.';
+  if(asset==='warr'&&action==='exercise'&&tr.spec&&(tr.spec.action==='sell'||tr.spec.action==='short'))
+    return 'Cannot exercise while selling/shorting Spec.';
+  if(action==='buy'){
+    if(p.cash<qty*v) return 'Needs '+fmt(qty*v)+' cash.';
+    if(inventory(asset)<qty) return 'Bank has only '+inventory(asset)+' available.';
+  }else if(action==='marginbuy'){
+    if(S.noMarginBuy) return 'Margin buys are blocked this round.';
+    if(p.cash<qty*v/2) return 'Needs '+fmt(qty*v/2)+' cash (50% down).';
+    if(inventory(asset)<qty) return 'Bank has only '+inventory(asset)+' available.';
+  }else if(action==='sell'){
+    let avail=hold;
+    if(asset==='spec'&&p.freshSpec&&p.freshSpec.round===S.round-1) avail=Math.max(0,avail-p.freshSpec.qty);
+    if(qty>avail) return 'You can sell at most '+avail+'.';
+  }else if(action==='short'){
+    if(inventory(asset)<qty) return 'Bank has only '+inventory(asset)+' available to borrow.';
+  }else if(action==='cover'){
+    if(qty>(p.short[asset]||0)) return 'You are short only '+(p.short[asset]||0)+'.';
+    if(p.cash<qty*v) return 'Cover costs '+fmt(qty*v)+' — not enough cash.';
+  }else if(action==='exercise'){
+    if(qty>hold) return 'You hold only '+hold+' warrants.';
+    if(p.cash<qty*S.strike) return 'Exercise costs '+fmt(qty*S.strike)+' — not enough cash.';
+  }else if(action==='convPref'){
+    if(qty>hold) return 'You hold only '+hold+'.';
+  }else if(action==='convBond'){
+    if(qty>hold) return 'You hold only '+hold+'.';
+  }
+  return null;
+}
+
+function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
+
+function colFor(net){ if(net>=3)return 0; if(net===2)return 1; if(net===1)return 2; if(net===0)return 3; if(net===-1)return 4; return 5; }
+
+function boardHTML(){
+  const tc=tabCounts();
+  let h='<h2 class="st">📊 Market Board — Round '+S.round+'</h2>';
+  // gauges
+  h+='<div class="card"><h3>Market Regime</h3>';
+  if(ruleOn('momentum')){
+  const mPct=((S.momentum+4)/8*100);
+  h+='<div class="gauge"><span style="min-width:90px">Momentum '+fmtN(S.momentum)+'</span><div class="gbar"><div class="gfill" style="left:0;width:'+mPct+'%;background:'+(S.momentum>0?'var(--buy)':(S.momentum<0?'var(--sell)':'var(--dim)'))+'"></div></div><span class="small muted">-4…+4</span></div>';
+  }
+  if(ruleOn('bubble')){
+  const bReady=S.bubble>=S.bubbleThreshold;
+  const bMax=ruleOn('randomBubble')?S.bubbleHi:12;
+  const bPct=Math.min(100,S.bubble/bMax*100);
+  const bLbl=ruleOn('randomBubble')?('🫧 Bubble '+S.bubble+' <span class="small muted">(hidden threshold '+S.bubbleLo+'–'+S.bubbleHi+')</span>'):('🫧 Bubble '+S.bubble+'/12');
+  h+='<div class="gauge"><span style="min-width:90px">'+bLbl+'</span><div class="gbar"><div class="gfill" style="left:0;width:'+bPct+'%;background:'+(bReady?'#a855f7':'var(--warn)')+'"></div></div>'+(bReady?'<b style="color:#d8b4fe">READY</b>':'')+'</div>';
+  }
+  if(S.regime) h+='<div class="muted">Last market card: <b>'+S.regime.toUpperCase()+'</b></div>';
+  h+='</div>';
+  // prices
+  h+='<div class="card"><h3>💹 Asset Prices</h3><table><tr><th>Asset</th><th>Quote</th><th>$ / unit</th><th>Chg</th><th>Tabs B−S</th></tr>';
+  ASSETS.forEach(a=>{
+    const ch=S.prices[a]-S.prevPrices[a];
+    const cls=ch>0?'up':(ch<0?'down':'flat');
+    const net=tc[a].buy-tc[a].sell;
+    h+='<tr><td><b>'+ANAME[a]+'</b><br><span class="small muted">'+ASH[a]+'</span></td>'+
+      '<td class="num"><b>'+S.prices[a]+'</b></td><td class="num">'+fmt(unitVal(a))+'</td>'+
+      '<td class="num '+cls+'">'+fmtN(ch)+'</td>'+
+      '<td class="num">'+(net>0?'<span class="up">+'+net+'</span>':(net<0?'<span class="down">'+net+'</span>':'<span class="flat">0</span>'))+' <span class="small muted">('+tc[a].buy+'B/'+tc[a].sell+'S)</span></td></tr>';
+  });
+  h+='</table></div>';
+  // tabs strip
+  const allTabs=(S.tabs.persistent||[]).map(t=>({t:t,l:'🌊'})).concat((S.tabs.mm||[]).map(t=>({t:t,l:'🎲'}))).concat((S.tabs.sched||[]).map(t=>({t:t,l:'📌'})));
+  h+='<div class="card"><h3>🗳️ Directional Tabs This Round</h3>';
+  h+= allTabs.length? allTabs.map(x=>'<span class="pill">'+x.l+' '+x.t.dir.toUpperCase()+' '+ASH[x.t.asset]+'</span>').join('') : '<span class="muted">No extra tabs.</span>';
+  h+='<div class="small muted" style="margin-top:6px;">🌊 persistent flow · 🎲 market-maker · 📌 scheduled/event</div></div>';
+  // feed
+  h+='<div class="card"><h3>📣 Event Feed</h3><div class="feed">'+
+    (S.feed.length?S.feed.slice(0,60).map(f=>'<div><span class="fr">R'+f.r+'</span> '+f.t+'</div>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
+  return h;
+}
+
+function tradesHostHTML(){
+  const opts=S.players.map(p=>'<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
+  const sel=ui.tradePid&&player(ui.tradePid)?ui.tradePid:S.players[0].id;
+  ui.tradePid=sel;
+  return '<h2 class="st">🔄 Trade Entry</h2>'+explainerHTML()+
+  '<div class="card"><label class="lbl">Entering trades for</label><select onchange="ui.tradePid=this.value;draftPid=null;render();">'+opts.replace('value="'+sel+'"','value="'+sel+'" selected')+'</select></div>'+
+  tradeEntryHTML(sel)+
+  submittedHTML();
+}
+
+function tradesPlayerHTML(pid){
+  const p=player(pid);
+  return '<h2 class="st">🔄 My Trades — '+esc(p.name)+'</h2>'+explainerHTML()+tradeEntryHTML(pid)+
+  '<div class="card"><h3>📤 Submit</h3><div class="muted">Your trades sync to the live game when you submit.</div>'+
+  '<div class="btnrow"><button class="btn ok" onclick="submitDraft(\''+pid+'\')">📤 Submit my trades</button>'+
+  '<button class="btn ghost" onclick="clearDraft()">Clear</button></div></div>';
+}
+
+function tradeEntryHTML(pid){
+  const p=player(pid);
+  if(S.phase!=='trading') return '<div class="card"><b>🔒 Trading is locked</b><div class="muted">Current phase: '+(PHLBL[S.phase]||S.phase)+'. The host advances rounds in the GM tab.</div></div>';
+  let h='<div class="card"><h3>'+esc(p.name)+' — Cash '+fmt(p.cash)+'</h3>';
+  ASSETS.forEach(a=>{
+    ensureDraft(pid); const tr=(draft.trades||{})[a]||{};
+    const hold=p.hold[a]||0, sht=p.short[a]||0;
+    const v=unitVal(a);
+    const err=draftErr[pid+asset];
+    let impact='';
+    if(tr.action&&tr.qty){
+      const q=tr.qty;
+      if(tr.action==='buy') impact='−'+fmt(q*v);
+      else if(tr.action==='marginbuy') impact='−'+fmt(q*v/2)+' cash +'+fmt(q*v/2)+' loan';
+      else if(tr.action==='sell') impact='+'+fmt(q*v);
+      else if(tr.action==='short') impact='+'+fmt(q*v/2)+' cash, '+fmt(q*v/2)+' locked';
+      else if(tr.action==='cover') impact='−'+fmt(q*v);
+      else if(tr.action==='exercise') impact='−'+fmt(q*S.strike);
+      else if(tr.action==='convPref') impact='→ '+q*convRatio()+' BC';
+      else if(tr.action==='convBond') impact='→ '+q*20*convRatio()+' BC';
+    }
+    h+='<div class="trow"><div class="tinfo"><div class="pn">'+ANAME[a]+' <span class="pp">'+fmt(v)+'/u</span></div>'+
+      '<div class="pp">Own '+hold+(sht?' · Short '+sht:'')+' · Bank '+inventory(a)+'</div>'+
+      (tr.action?'<div class="pp" style="color:var(--acc)">'+tr.action.toUpperCase()+' '+tr.qty+' <span class="pp">'+impact+'</span></div>':'')+
+      (err?'<div class="err">'+esc(err)+'</div>':'')+'</div>'+
+      '<div class="tact">';
+    const acts=[['buy','Buy'],['sell','Sell']];
+    if(ruleOn('short')) acts.push(['short','Short'],['cover','Cover']);
+    if(ruleOn('margin')) acts.push(['marginbuy','M.Buy']);
+    h+='<div class="btnrow">'+acts.map(x=>{
+      const cls=x[0]==='buy'||x[0]==='marginbuy'||x[0]==='cover'?'sel-buy':(x[0]==='sell'||x[0]==='short'?'sel-sell':'sel');
+      return '<button class="abtn '+(tr.action===x[0]?cls:'')+'" onclick="setTrade(\''+pid+'\',\''+a+'\',\''+x[0]+'\')">'+x[1]+'</button>';
+    }).join('')+'</div>';
+    if(a==='warr'&&ruleOn('warrants')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='exercise'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'warr\',\'exercise\')">📜 Exercise → SPEC ($'+S.strike+')</button></div>';
+    if(a==='pref'&&ruleOn('conversions')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='convPref'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'pref\',\'convPref\')">🔁 Convert → BC</button></div>';
+    if(a==='bond'&&ruleOn('conversions')) h+='<div class="btnrow" style="margin-top:4px;"><button class="abtn '+(tr.action==='convBond'?'sel':'')+'" onclick="setTrade(\''+pid+'\',\'bond\',\'convBond\')">🔁 Convert → BC</button></div>';
+    if(tr.action) h+='<div class="stepper" style="margin-top:6px;"><button onclick="setQty(\''+pid+'\',\''+a+'\',-1)">−</button>'+
+      '<input value="'+tr.qty+'" inputmode="numeric" onchange="setQtyDirect(\''+pid+'\',\''+a+'\',this.value)"><button onclick="setQty(\''+pid+'\',\''+a+'\',1)">+</button>'+
+      '<span class="small muted" style="margin-left:6px;">'+(a==='bond'?'bonds':'shares')+'</span></div>';
+    h+='</div></div>';
+  });
+  // cash actions
+  const ca=draft.cashAct||{};
+  const cerr=draftCashErr;
+  h+='<h3 style="margin-top:12px;">💵 Cash / Loans</h3>'+
+  '<div class="kv"><span>Margin loan '+fmt(p.loan||0)+'</span><span>Collateral '+fmt(p.collat||0)+'</span></div>'+
+  cashRow(pid,'repay','Repay margin',ca.repay,cerr[pid+'repay'])+
+  cashRow(pid,'addC','Add short collateral',ca.addC,cerr[pid+'addC'])+
+  cashRow(pid,'relC','Release short collateral',ca.relC,cerr[pid+'relC']);
+  h+='<div class="btnrow" style="margin-top:10px;"><button class="btn ok" onclick="submitDraft(\''+pid+'\')">📤 Submit trades</button><button class="btn ghost" onclick="clearDraft()">Clear</button></div>';
+  h+='</div>';
+  return h;
+}
+
+function cashRow(pid,kind,label,val,err){
+  return '<div class="trow"><div class="tinfo"><div class="pn" style="font-size:14px;">'+label+'</div>'+(err?'<div class="err">'+esc(err)+'</div>':'')+'</div>'+
+  '<div class="tact"><div class="stepper"><input id="ca_'+pid+'_'+kind+'" value="'+(val||0)+'" inputmode="numeric" style="width:110px;">'+
+  '<button class="btn ghost" style="min-height:48px;margin:0;" onclick="setCashAct(\''+pid+'\',\''+kind+'\',$(\'ca_'+pid+'_'+kind+'\').value)">Set</button></div></div></div>';
+}
+
+function playerRowHTML(p,rank){
+  const me=marginExcess(p), se=shortExcess(p), nw=netWorth(p);
+  let h='<tr><td><b>'+rank+'. '+esc(p.name)+'</b>'+
+    (me<0?'<span class="flag mc">MARGIN CALL</span>':'')+(se<0?'<span class="flag cc">COLLATERAL CALL</span>':'')+'</td>'+
+    '<td class="num">'+fmt(p.cash)+'</td><td class="num">'+fmt(longVal(p))+'</td>'+
+    '<td class="num">'+fmt(nw)+'</td></tr>';
+  return h;
+}
+
+function playersHTML(){
+  const sorted=[...S.players].sort((a,b)=>netWorth(b)-netWorth(a));
+  let h='<h2 class="st">👥 Standings</h2><div class="card"><table class="standings"><tr><th>Player</th><th>Cash</th><th>Long $</th><th>Net Worth</th></tr>';
+  sorted.forEach((p,i)=>h+=playerRowHTML(p,i+1));
+  h+='</table></div>';
+  S.players.forEach(p=>{
+    const me=marginExcess(p), se=shortExcess(p);
+    h+='<div class="card"><details><summary><b>'+esc(p.name)+'</b> — '+fmt(netWorth(p))+' <span class="muted">(tap for detail)</span></summary>'+
+    '<div class="kv"><span>Cash</span><b>'+fmt(p.cash)+'</b></div>'+
+    '<div class="kv"><span>Long value</span><b>'+fmt(longVal(p))+'</b></div>'+
+    '<div class="kv"><span>Short liability</span><b>'+fmt(shortLiab(p))+'</b></div>'+
+    '<div class="kv"><span>Short collateral</span><b>'+fmt(p.collat||0)+'</b></div>'+
+    '<div class="kv"><span>Margin loan</span><b>'+fmt(p.loan||0)+'</b></div>'+
+    '<div class="kv"><span>Margin Excess</span><b class="'+(me<0?'down':'up')+'">'+fmt(me)+'</b></div>'+
+    '<div class="kv"><span>Collateral Excess</span><b class="'+(se<0?'down':'up')+'">'+fmt(se)+'</b></div>'+
+    '<table><tr><th>Asset</th><th>Own</th><th>Short</th><th>Value</th></tr>'+
+    ASSETS.map(a=>'<tr><td>'+ASH[a]+'</td><td class="num">'+(p.hold[a]||0)+'</td><td class="num">'+(p.short[a]||0)+'</td><td class="num">'+fmt((p.hold[a]||0)*unitVal(a))+'</td></tr>').join('')+
+    '</table></details></div>';
+  });
+  return h;
+}
+
+function portfolioHTML(pid){
+  const p=player(pid);
+  const me=marginExcess(p), se=shortExcess(p);
+  let h='<h2 class="st">👤 '+esc(p.name)+'</h2><div class="card"><h3>Net Worth '+fmt(netWorth(p))+'</h3>'+
+  (me<0?'<div><span class="flag mc">MARGIN CALL</span></div>':'')+(se<0?'<div><span class="flag cc">COLLATERAL CALL</span></div>':'')+
+  '<div class="kv"><span>Cash</span><b>'+fmt(p.cash)+'</b></div>'+
+  '<div class="kv"><span>Long value</span><b>'+fmt(longVal(p))+'</b></div>'+
+  '<div class="kv"><span>Short liability</span><b>'+fmt(shortLiab(p))+'</b></div>'+
+  '<div class="kv"><span>Short collateral</span><b>'+fmt(p.collat||0)+'</b></div>'+
+  '<div class="kv"><span>Margin loan</span><b>'+fmt(p.loan||0)+'</b></div>'+
+  '<div class="kv"><span>Margin Excess</span><b class="'+(me<0?'down':'up')+'">'+fmt(me)+'</b></div>'+
+  '<div class="kv"><span>Collateral Excess</span><b class="'+(se<0?'down':'up')+'">'+fmt(se)+'</b></div>'+
+  '<table><tr><th>Asset</th><th>Own</th><th>Short</th><th>Value</th></tr>'+
+  ASSETS.map(a=>'<tr><td>'+ASH[a]+'</td><td class="num">'+(p.hold[a]||0)+'</td><td class="num">'+(p.short[a]||0)+'</td><td class="num">'+fmt((p.hold[a]||0)*unitVal(a))+'</td></tr>').join('')+
+  '</table></div>';
+  return h;
+}
+
+function bankHTML(){
+  let h='<h2 class="st">🏦 Bank Inventory</h2><div class="card"><table><tr><th>Asset</th><th>Outst.</th><th>Player long</th><th>Shorts</th><th>Inventory</th></tr>';
+  ASSETS.forEach(a=>{
+    let l=0,s=0; S.players.forEach(p=>{ l+=(p.hold[a]||0); s+=(p.short[a]||0); });
+    const inv=S.outstanding[a]-l-s;
+    const invH=inv<=0?'<b class="'+(inv<0?'down':'')+'">'+(inv===0?'NO SHARES AVAILABLE':('ERR '+inv))+'</b>':inv;
+    h+='<tr><td><b>'+ANAME[a]+'</b></td><td class="num">'+S.outstanding[a]+'</td><td class="num">'+l+'</td><td class="num">'+s+'</td><td class="num">'+invH+'</td></tr>';
+  });
+  h+='</table><div class="small muted" style="margin-top:6px;">Inventory = outstanding − player longs − open shorts.</div></div>';
+  const fc=(S.fireChecks||[]).filter(c=>c.status!=='normal');
+  if(fc.length){ h+='<div class="card"><h3>🔥 Fire Sales</h3>'+fc.map(c=>'<div>🔥 '+ANAME[c.asset]+' — '+c.status.toUpperCase()+' ('+Math.round(c.pct*100)+'% of outstanding)</div>').join('')+'</div>'; }
+  return h;
+}
+
+function historyHTML(){
+  let h='<h2 class="st">📜 Round History</h2>';
+  if(!S.history.length) return h+'<div class="card"><span class="muted">No completed rounds yet.</span></div>';
+  h+='<div class="card"><canvas class="chart" id="nwChart"></canvas></div>';
+  h+='<div class="card"><table><tr><th>Rd</th>'+S.players.map(p=>'<th>'+esc(p.name)+'</th>').join('')+'<th>Prices</th></tr>';
+  S.history.forEach(s=>{
+    h+='<tr><td>'+s.round+(s.regime?' <span class="small muted">'+s.regime[0].toUpperCase()+'</span>':'')+'</td>'+
+      S.players.map(p=>'<td class="num">'+fmt(s.nw[p.id]!=null?s.nw[p.id]:0)+'</td>').join('')+
+      '<td class="small muted num">'+ASSETS.map(a=>ASH[a]+' '+s.prices[a]).join(' ')+'</td></tr>';
+  });
+  h+='</table></div>';
+  if(S.phase==='over'){
+    const sorted=[...S.players].sort((a,b)=>netWorth(b)-netWorth(a));
+    h+='<div class="card" style="border-color:var(--buy)"><h3>🏆 '+esc(sorted[0].name)+' wins with '+fmt(netWorth(sorted[0]))+'!</h3>'+
+    sorted.map((p,i)=>(i+1)+'. '+esc(p.name)+' — '+fmt(netWorth(p))).join('<br>')+'</div>';
+  }
+  return h;
+}
+
+function drawChart(){
+  const c=$('nwChart'); if(!c||!S.history.length) return;
+  const dpr=window.devicePixelRatio||1;
+  const W=c.clientWidth,H=220; c.width=W*dpr; c.height=H*dpr;
+  const x=c.getContext('2d'); x.scale(dpr,dpr);
+  const cols=['#38bdf8','#4ade80','#f472b6','#facc15','#a78bfa','#fb923c','#2dd4bf','#f87171','#93c5fd','#d9f99d','#fca5a5','#86efac'];
+  let mn=Infinity,mx=-Infinity;
+  S.history.forEach(s=>S.players.forEach(p=>{ const v=s.nw[p.id]; if(v<mn)mn=v; if(v>mx)mx=v; }));
+  if(mx===mn) mx=mn+1;
+  const pad=28, X=i=>pad+i*(W-2*pad)/Math.max(1,S.history.length-1), Y=v=>H-pad-(v-mn)/(mx-mn)*(H-2*pad);
+  x.strokeStyle='#334155'; x.fillStyle='#94a3b8'; x.font='10px sans-serif';
+  for(let g=0;g<=4;g++){ const v=mn+(mx-mn)*g/4, y=Y(v); x.beginPath(); x.moveTo(pad,y); x.lineTo(W-pad,y); x.stroke(); x.fillText('$'+Math.round(v).toLocaleString(),2,y+3); }
+  S.players.forEach((p,pi)=>{
+    x.strokeStyle=cols[pi%cols.length]; x.lineWidth=2; x.beginPath();
+    S.history.forEach((s,i)=>{ const px=X(i),py=Y(s.nw[p.id]); i?x.lineTo(px,py):x.moveTo(px,py); });
+    x.stroke(); x.fillStyle=cols[pi%cols.length];
+    x.fillText(p.name.split(' ')[0], X(S.history.length-1)+4, Y(S.history[S.history.length-1].nw[p.id]));
+  });
+}
+
+function gmHTML(){
+  let h='<h2 class="st">🎛️ Round '+S.round+' Control</h2>';
+  const idx=phaseIdx();
+  h+='<div class="phasebar">'+PHASES.map((p,i)=>'<span class="'+(i===idx?'on':(i<idx?'done':''))+'">'+PHLBL[p]+'</span>').join('')+'</div>';
+  if(S.phase==='trading'){
+    const n=Object.keys(S.trades||{}).filter(pid=>Object.keys(S.trades[pid]||{}).length>0).length;
+    h+='<div class="card"><h3>Trading phase</h3><div class="muted">'+n+' / '+S.players.length+' players have entered trades.</div>'+
+    '<div class="btnrow"><button class="btn ghost" onclick="genMM()">🎲 Regenerate market-maker tabs</button>'+
+    '<button class="btn ok" onclick="lockResolve()">🔒 Lock &amp; Resolve Orders</button></div></div>';
+  }else if(S.phase==='event'){
+    h+='<div class="card"><h3>🎲 Random Event — 1d12 (12 triggers)</h3>';
+    if(!ruleOn('randevents')){
+      h+='<div class="muted">Random events are disabled (house rules).</div>'+
+      '<div class="btnrow"><button class="btn ghost" onclick="apiPhase(\'market\')">Continue to Market →</button></div>';
+    }else{
+    if(S.eventCard){ h+='<div class="evcard"><h4>🃏 '+esc(S.eventCard.n)+'</h4><div>'+esc(S.eventCard.d)+'</div></div>'; }
+    h+='<div class="btnrow"><button class="btn" onclick="rollD12()">🎲 Roll d12'+(S.mediaRounds>0?' ×2':'')+'</button>'+
+    '<button class="btn ghost" onclick="apiPhase(\'market\')">Skip to Market →</button></div>';
+    }
+    h+='</div>';
+  }else if(S.phase==='market'){
+    h+='<div class="card"><h3>🃏 Market Environment Card</h3><div class="muted">The Broker draws the top Trend Card.</div>'+
+    '<div class="btnrow"><button class="btn ok" style="font-size:18px;" onclick="flipTrend()">🃏 FLIP TREND CARD</button></div>'+
+    '<div class="muted" style="margin-top:10px;">Host override:</div><div class="btnrow">'+
+    '<button class="btn ghost" onclick="setRegime(\'bull\')">🐂 Bull</button>'+
+    '<button class="btn ghost" onclick="setRegime(\'mixed\')">➖ Mixed</button>'+
+    '<button class="btn ghost" onclick="setRegime(\'bear\')">🐻 Bear</button></div></div>';
+  }else if(S.phase==='moves'){
+    const pv=S.preview;
+    h+='<div class="card"><h3>📊 Proposed Price Moves ('+S.regime.toUpperCase()+', Mom '+fmtN(S.momentum)+')</h3><table><tr><th>Asset</th><th>Net tabs</th><th>Col</th><th>Base</th><th>Mom</th><th>Event</th><th>Total</th><th>New</th></tr>';
+    ASSETS.forEach(a=>{ const r=pv[a];
+      h+='<tr><td><b>'+ASH[a]+'</b></td><td class="num">'+fmtN(r.net)+'</td><td>'+r.col+'</td><td class="num">'+fmtN(r.base)+'</td><td class="num">'+fmtN(r.mod)+'</td><td class="num">'+fmtN(r.adj)+'</td><td class="num"><b>'+fmtN(r.total)+'</b></td><td class="num"><b>'+r.neu+'</b></td></tr>'; });
+    h+='</table><div class="btnrow" style="margin-top:8px;"><button class="btn ok" onclick="confirmMoves()">✓ Confirm Price Moves</button></div></div>';
+  }else if(S.phase==='firesale'){
+    h+='<div class="card"><h3>🔥 Fire Sale Resolution</h3>';
+    S.fireChecks.forEach((c,ix)=>{
+      if(c.status==='normal') return;
+      h+='<h3 style="margin-top:10px;">'+ANAME[c.asset]+' — '+c.status.toUpperCase()+' ('+Math.round(c.pct*100)+'% of outstanding)</h3>';
+      if(c.status==='roll') h+='<div class="btnrow"><button class="btn" onclick="rollFireSale('+ix+')">🎲 Roll d6 (1–3 normal, 4–6 fire sale)</button></div>';
+    });
+    if(!S.firesale.length) h+='<div class="muted">No fire-sale sellers to resolve.</div>';
+    S.firesale.forEach((f,ix)=>{
+      const seller=player(f.seller);
+      const buyers=S.players.filter(p=>p.id!==f.seller).map(p=>'<option value="'+p.id+'"'+(f.buyerId===p.id?' selected':'')+'>'+esc(p.name)+'</option>').join('');
+      h+='<div class="card" style="background:var(--card2)"><b>'+esc(seller.name)+'</b> sold '+f.soldQty+' '+ASH[f.asset]+' — <b>'+f.exposed+'</b> exposed to fire sale.'+
+      '<label class="lbl">Player buyer (optional)</label><select onchange="setFireBuyer('+ix+',this.value)"><option value="">— none, all to bank —</option>'+buyers+'</select>'+
+      (f.buyerId?'<label class="lbl">Qty bought by player (0–'+f.exposed+', at market price)</label><div class="stepper"><input value="'+f.buyerQty+'" inputmode="numeric" onchange="setFireBuyerQty('+ix+',this.value)"></div>':'')+
+      '<div class="small muted" style="margin-top:4px;">Remainder goes to bank at 65% of market value.</div></div>';
+    });
+    h+='<div class="btnrow"><button class="btn ok" onclick="confirmFireSale()">✓ Confirm Fire-Sale Resolution</button></div></div>';
+  }else if(S.phase==='bubble'){
+    const bubTitle=ruleOn('randomBubble')?('🫧 Bubble Check — score '+S.bubble+' <span class="small muted">(threshold hidden, range '+S.bubbleLo+'–'+S.bubbleHi+')</span>'):('🫧 Bubble Check — score '+S.bubble+'/12');
+    h+='<div class="card"><h3>'+bubTitle+'</h3>';
+    if(!S.bubbleChecked){
+      h+='<div class="muted">Compute crowding, warrant concentration, and check the threshold.</div>'+
+      '<div class="btnrow"><button class="btn" onclick="bubbleStep()">🧮 Run Bubble Check</button></div>';
+    }else if(!S.bubbleDone&&S.bubbleReady){
+      h+='<div class="muted">🫧🫧 BUBBLE READY — draw from the '+String(S.regime).toUpperCase()+' deck.</div>'+
+      '<div class="btnrow"><button class="btn warnb" onclick="drawBubble()">🃏 Draw Bubble Card</button></div>';
+    }else{
+      if(S.bubbleCard) h+='<div class="evcard"><h4>🃏 '+esc(S.bubbleCard.n)+'</h4><div>'+esc(S.bubbleCard.d)+'</div></div>';
+      else h+='<div class="muted">No bubble event this round (score '+S.bubble+(ruleOn('randomBubble')?', range '+S.bubbleLo+'–'+S.bubbleHi:'/'+S.bubbleThreshold)+').</div>';
+      h+='<div class="btnrow"><button class="btn ghost" onclick="apiPhase(\'endround\')">Continue →</button></div>';
+    }
+    h+='</div>';
+  }else if(S.phase==='endround'){
+    h+='<div class="card"><h3>🧾 End of Round '+S.round+'</h3><div class="muted">Warrant decay, maintenance flags, persistent flow, and scheduled effects are applied when you close the round.</div>'+
+    '<div class="btnrow"><button class="btn ok" onclick="endRound()">'+(S.round>=S.rounds?'🏁 Finish Game':'➡️ Start Round '+(S.round+1))+'</button></div></div>';
+  }
+  h+='<div class="card"><h3>📣 Event Feed</h3><div class="feed">'+
+    (S.feed.length?S.feed.slice(0,40).map(f=>'<div><span class="fr">R'+f.r+'</span> '+f.t+'</div>').join(''):'<span class="muted">No events yet.</span>')+'</div></div>';
+  return h;
+}
+"use strict";
+/* ===== Stock Market Game — multiplayer client controller ===== */
+const $=id=>document.getElementById(id);
+let S=null;
+let ui={tab:'board',tradePid:null};
+let NET={code:null,token:null,playerId:null,host:false};
+let draft={trades:{},cashAct:{}};
+let draftPid=null, draftErr={}, draftCashErr={};
+const SESKEY='smg-net-v1';
+
+function saveSes(){ try{localStorage.setItem(SESKEY,JSON.stringify(NET));}catch(e){} }
+function loadSes(){ try{const o=JSON.parse(localStorage.getItem(SESKEY)); if(o&&o.code&&o.token) NET=o;}catch(e){} }
+
+function api(action,params){
+  return fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({code:NET.code,token:NET.token,action:action},params||{}))})
+    .then(r=>r.json()).then(o=>{ if(!o.ok&&o.err) alert(o.err); if(o.state){S=o.state;} render(); return o; })
+    .catch(()=>{});
+}
+function apiPhase(ph){ api('setPhase',{phase:ph}); }
+let EV=null;
+function connect(){
+  if(EV) try{EV.close();}catch(e){}
+  EV=new EventSource('/api/stream?code='+encodeURIComponent(NET.code)+'&token='+encodeURIComponent(NET.token));
+  EV.onmessage=e=>{ try{const o=JSON.parse(e.data); if(o.state){S=o.state; render();}}catch(err){} };
+}
+
+/* ----- draft trades (local until submitted) ----- */
+function ensureDraft(pid){
+  if(draftPid!==pid||!draft){
+    draftPid=pid;
+    draft={trades:JSON.parse(JSON.stringify((S.trades&&S.trades[pid])||{})),cashAct:JSON.parse(JSON.stringify((S.cashAct&&S.cashAct[pid])||{}))};
+    draftErr={}; draftCashErr={};
+  }
+}
+function defaultQty(a){ return a==='bond'?1:10; }
+function setTrade(pid,asset,action){
+  if(!S||S.phase!=='trading') return;
+  ensureDraft(pid);
+  const cur=draft.trades[asset];
+  if(cur&&cur.action===action){ delete draft.trades[asset]; }
+  else{
+    const qty=(cur&&cur.qty)||defaultQty(asset);
+    const err=tradeError(pid,asset,action,qty);
+    if(err){ draftErr[pid+asset]=err; }
+    else{ delete draftErr[pid+asset]; draft.trades[asset]={action:action,qty:qty}; }
+  }
+  render();
+}
+function setQty(pid,asset,delta){
+  if(!S||S.phase!=='trading') return;
+  ensureDraft(pid);
+  const cur=draft.trades[asset]; if(!cur) return;
+  let q=cur.qty+delta; if(q<1) q=1;
+  const err=tradeError(pid,asset,cur.action,q);
+  if(err){ draftErr[pid+asset]=err; } else { delete draftErr[pid+asset]; cur.qty=q; }
+  render();
+}
+function setQtyDirect(pid,asset,val){
+  if(!S||S.phase!=='trading') return;
+  const q=parseInt(val,10); ensureDraft(pid);
+  const cur=draft.trades[asset]; if(!cur||!(q>0)) return;
+  const err=tradeError(pid,asset,cur.action,q);
+  if(err){ draftErr[pid+asset]=err; } else { delete draftErr[pid+asset]; cur.qty=q; }
+  render();
+}
+function setCashAct(pid,kind,val){
+  if(!S||S.phase!=='trading') return;
+  ensureDraft(pid);
+  const p=player(pid); const v=Math.max(0,Math.round(Number(val)||0));
+  let err=null;
+  if(kind==='repay'&&v>Math.min(p.loan||0,p.cash)) err='Cannot repay more than loan/cash.';
+  if(kind==='addC'&&v>p.cash) err='Not enough cash.';
+  if(kind==='relC'&&v>shortExcess(p)) err='Release would breach collateral requirement.';
+  draft.cashAct[kind]=v; draftCashErr[pid+kind]=err;
+  render();
+}
+function clearDraft(){ draft={trades:{},cashAct:{}}; draftErr={}; draftCashErr={}; render(); }
+function submitDraft(pid){
+  pid=pid||draftPid;
+  if(!pid) return;
+  api('submitTrades',{pid:pid,trades:draft.trades,cashAct:draft.cashAct}).then(o=>{
+    if(o&&o.ok){ draftPid=null; draft={trades:{},cashAct:{}}; draftErr={}; draftCashErr={}; }
+    if(o&&o.errs&&o.errs.length) alert('Some trades rejected:\n'+o.errs.join('\n'));
+  });
+}
+
+/* ----- host actions -> server ----- */
+function lockResolve(){ if(confirm('Lock trading and resolve all orders for round '+S.round+'?')) api('lockResolve'); }
+function rollD12(){ api('rollD12'); }
+function setRegime(r){ api('setRegime',{regime:r}); }
+function flipTrend(){ api('flipTrend'); }
+function confirmMoves(){ api('confirmMoves'); }
+function rollFireSale(ix){ api('rollFireSale',{ix:ix}); }
+function setFireBuyer(ix,v){ api('setFireBuyer',{ix:ix,buyerId:v}); }
+function setFireBuyerQty(ix,v){ api('setFireBuyerQty',{ix:ix,qty:v}); }
+function confirmFireSale(){ api('confirmFireSale'); }
+function bubbleStep(){ api('bubbleStep'); }
+function drawBubble(){ api('drawBubble'); }
+function endRound(){ api('endRound'); }
+function genMM(){ api('genMM'); }
+
+function explainerHTML(){
+  return '<div class="explainer"><b>📲 Live game:</b> your trades sync instantly to the host board when you hit Submit. No codes needed.</div>';
+}
+function submittedHTML(){
+  const ids=Object.keys(S.trades||{}).filter(pid=>Object.keys(S.trades[pid]||{}).length>0);
+  let h='<div class="card"><h3>📥 Submitted trades ('+ids.length+'/'+S.players.length+')</h3>';
+  if(!ids.length) h+='<span class="muted">Waiting for players…</span>';
+  h+=ids.map(pid=>{ const p=player(pid); const tr=S.trades[pid];
+    return '<div class="small" style="padding:5px 0;border-bottom:1px solid var(--line)"><b>'+esc(p?p.name:'?')+'</b>: '+
+      Object.keys(tr).map(a=>tr[a].action+' '+tr[a].qty+' '+ASH[a]).join(', ')+'</div>'; }).join('');
+  return h+'</div>';
+}
+
+/* ----- landing: create / join ----- */
+function landingHTML(){
+  const pre=(new URLSearchParams(location.search).get('code')||'').toUpperCase();
+  return '<h2 class="st">📈 Stock Market Game</h2>'+
+  '<div class="explainer"><b>📲 Live multiplayer:</b> the host creates a game and shares the 4-letter code. '+
+  'Everyone opens this page on their phone — trades sync instantly, the host runs the rounds.</div>'+
+  '<div class="card"><h3>🎛️ Host a game</h3><div class="btnrow"><button class="btn ok" onclick="showCreate()">Create new game</button></div></div>'+
+  '<div class="card"><h3>🧑 Join a game</h3>'+
+  '<label class="lbl">Game code</label><input type="text" id="jCode" value="'+esc(pre)+'" style="text-transform:uppercase;letter-spacing:6px;font-size:22px;text-align:center;" maxlength="4">'+
+  '<label class="lbl">Your name</label><input type="text" id="jName" maxlength="24">'+
+  '<div class="btnrow" style="margin-top:8px;"><button class="btn" onclick="joinGame()">Join</button></div><div id="jErr"></div></div>'+
+  '<div id="createBox"></div>';
+}
+function showCreate(){
+  const rules=RULES.map(r=>'<label class="lbl" style="display:flex;gap:10px;align-items:flex-start;">'+
+    '<input type="checkbox" id="c_ru_'+r[0]+'" checked style="width:auto;min-width:24px;min-height:24px;margin-top:2px;">'+
+    '<span><b>'+r[1]+'</b><br><span class="small muted">'+r[2]+'</span></span></label>').join('');
+  $('createBox').innerHTML='<div class="card"><h3>⚙️ New game</h3>'+
+  '<label class="lbl">Game name</label><input type="text" id="c_name" value="Stock Market Game" maxlength="60">'+
+  '<div class="grid2"><div><label class="lbl">Rounds</label><input type="text" id="c_rounds" inputmode="numeric" value="10"></div>'+
+  '<div><label class="lbl">Starting cash</label><input type="text" id="c_cash" inputmode="numeric" value="2000"></div></div>'+
+  '<div class="grid2"><div><label class="lbl">Starting Blue Chip</label><input type="text" id="c_bc" inputmode="numeric" value="10"></div>'+
+  '<div><label class="lbl">Starting Speculative</label><input type="text" id="c_spec" inputmode="numeric" value="0"></div></div>'+
+  '<label class="lbl">Warrant strike ($)</label><input type="text" id="c_strike" inputmode="numeric" value="50">'+
+  '<label class="lbl"><input type="checkbox" id="c_splits" checked style="width:auto;"> Automatic stock splits</label>'+
+  '<h3 style="margin-top:10px;">🎲 House Rules</h3>'+rules+
+  '<label class="lbl">🎲 Random threshold range (blank = auto by player count)</label><div style="display:flex;gap:6px;">'+
+  '<input type="text" id="c_bubLo" inputmode="numeric" placeholder="min" style="text-align:center">'+
+  '<input type="text" id="c_bubHi" inputmode="numeric" placeholder="max" style="text-align:center"></div>'+
+  '<div class="btnrow" style="margin-top:10px;"><button class="btn ok" onclick="createGame()">🚀 Create &amp; host</button></div><div id="cErr"></div></div>';
+  $('createBox').scrollIntoView();
+}
+function createGame(){
+  const rules={}; RULES.forEach(r=>{ const el=$('c_ru_'+r[0]); rules[r[0]]=el?el.checked:true; });
+  const cfg={rounds:parseInt($('c_rounds').value,10)||10, cash:parseInt($('c_cash').value,10)||2000,
+    bc:parseInt($('c_bc').value,10)||0, spec:parseInt($('c_spec').value,10)||0,
+    strike:parseInt($('c_strike').value,10)||50, splitsOn:$('c_splits').checked, rules:rules,
+    bubbleLo:parseInt($('c_bubLo').value,10)||0, bubbleHi:parseInt($('c_bubHi').value,10)||0};
+  fetch('/api/create',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:$('c_name').value,config:cfg})}).then(r=>r.json()).then(o=>{
+    if(!o.ok){ $('cErr').innerHTML='<div class="err">'+esc(o.err||'Failed')+'</div>'; return; }
+    NET={code:o.code,token:o.hostToken,playerId:null,host:true}; saveSes(); S=o.state; connect(); render();
+  });
+}
+function joinGame(){
+  const code=$('jCode').value.trim().toUpperCase(), name=$('jName').value.trim();
+  fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code:code,name:name})}).then(r=>r.json()).then(o=>{
+    if(!o.ok){ $('jErr').innerHTML='<div class="err">'+esc(o.err||'Join failed')+'</div>'; return; }
+    NET={code:code,token:o.playerToken,playerId:o.playerId,host:false}; saveSes(); S=o.state; connect(); render();
+  });
+}
+function logout(){ try{localStorage.removeItem(SESKEY);}catch(e){} location.href='/'; }
+function downloadBackup(){
+  fetch('/api/backup',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code:NET.code,token:NET.token})}).then(r=>r.json()).then(o=>{
+    if(!o.ok){ alert(o.err); return; }
+    const blob=new Blob([JSON.stringify(o.state)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='smg-'+NET.code+'.json'; a.click();
+  });
+}
+
+/* ----- host setup tab ----- */
+function hostSetupHTML(){
+  let h='<h2 class="st">⚙️ Setup</h2>'+
+  '<div class="card"><h3>🎲 House Rules</h3><div class="muted">Changes apply immediately, even mid-game.</div>'+
+  RULES.map(r=>'<label class="lbl" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">'+
+    '<input type="checkbox" '+((S.rules&&S.rules[r[0]])?'checked':'')+' style="width:auto;min-width:24px;min-height:24px;margin-top:2px;" onchange="setRule(\''+r[0]+'\',this.checked)">'+
+    '<span><b>'+r[1]+'</b><br><span class="small muted">'+r[2]+'</span></span></label>').join('');
+  if(ruleOn('randomBubble')){
+    h+='<label class="lbl">🎲 Random threshold range</label><div style="display:flex;gap:6px;">'+
+    '<input type="text" inputmode="numeric" id="ru_bubLo" value="'+S.bubbleLo+'" onchange="setBubbleRange(this.value,document.getElementById(\'ru_bubHi\').value)" style="text-align:center">'+
+    '<input type="text" inputmode="numeric" id="ru_bubHi" value="'+S.bubbleHi+'" onchange="setBubbleRange(document.getElementById(\'ru_bubLo\').value,this.value)" style="text-align:center"></div>';
+  }
+  h+='</div>'+
+  '<div class="card"><h3>🔗 Invite players</h3><div class="muted">Share this code or link:</div>'+
+  '<div style="font-size:34px;font-weight:800;letter-spacing:8px;text-align:center;margin:8px 0;">'+esc(NET.code)+'</div>'+
+  '<div class="small muted" style="word-break:break-all;text-align:center;">'+esc(location.origin+location.pathname)+'?code='+esc(NET.code)+'</div></div>'+
+  '<div class="card"><h3>💾 Backup</h3><div class="btnrow"><button class="btn ghost" onclick="downloadBackup()">Download game JSON</button>'+
+  '<button class="btn danger" onclick="logout()">Leave game</button></div></div>';
+  return h;
+}
+
+/* ----- render shell ----- */
+function go(t){ ui.tab=t; render(); }
+function render(){
+  const app=$('app');
+  if(!NET.code||!NET.token){ setTabs([]); $('roleLbl').textContent=''; $('hdrTitle').textContent='📈 Stock Market Game'; $('hdrSub').textContent='Create or join a game'; $('hdrPills').innerHTML=''; app.innerHTML=landingHTML(); return; }
+  if(!S){ app.innerHTML='<div class="card">Connecting…</div>'; return; }
+  const isHost=NET.host;
+  const me=(!isHost&&NET.playerId)?player(NET.playerId):null;
+  $('roleLbl').textContent=isHost?('🎛️ Host · '+NET.code):('🧑 '+(me?me.name:''));
+  $('hdrTitle').textContent='📈 '+S.name;
+  $('hdrSub').textContent='Game '+NET.code+' · Round '+S.round+'/'+S.rounds+' · '+S.players.length+' players';
+  const ph=S.phase==='over'?'🏁 Game Over':(PHLBL[S.phase]||S.phase);
+  let pills='<span class="pill">Round '+S.round+'/'+S.rounds+'</span><span class="pill">'+ph+'</span>';
+  if(S.regime) pills+='<span class="pill">'+S.regime.toUpperCase()+'</span>';
+  if(ruleOn('momentum')) pills+='<span class="pill">Mom '+fmtN(S.momentum)+'</span>';
+  if(ruleOn('bubble')){
+    const bReady=S.bubbleThreshold!=null&&S.bubble>=S.bubbleThreshold;
+    const bLbl=ruleOn('randomBubble')?('🫧 '+S.bubble+'/'+S.bubbleLo+'–'+S.bubbleHi):('🫧 '+S.bubble+'/12');
+    pills+='<span class="pill'+(bReady?' bub':'')+'">'+bLbl+'</span>';
+  }
+  $('hdrPills').innerHTML=pills;
+  const tabs=isHost?[['board','📊 Board'],['trades','🔄 Trades'],['players','👥 Players'],['bank','🏦 Bank'],['history','📜 History'],['gm','🎛️ GM'],['setup','⚙️ Setup']]
+                   :[['board','📊 Board'],['trades','🔄 My Trades'],['players','👤 Me'],['history','📜 History']];
+  setTabs(tabs);
+  let h='';
+  if(S.phase==='over'&&ui.tab!=='history'){ /* allow all tabs at game over */ }
+  if(ui.tab==='board') h=boardHTML();
+  else if(ui.tab==='trades') h=isHost?tradesHostHTML():tradesPlayerHTML(NET.playerId);
+  else if(ui.tab==='players') h=isHost?playersHTML():portfolioHTML(NET.playerId);
+  else if(ui.tab==='bank') h=bankHTML();
+  else if(ui.tab==='history') h=historyHTML();
+  else if(ui.tab==='gm') h=isHost?gmHTML():boardHTML();
+  else if(ui.tab==='setup') h=isHost?hostSetupHTML():boardHTML();
+  app.innerHTML=h;
+  if(ui.tab==='history') drawChart();
+  window.scrollTo(0,0);
+}
+function setTabs(tabs){
+  $('tabBar').innerHTML=tabs.map(t=>'<button class="'+(ui.tab===t[0]?'on':'')+'" onclick="go(\''+t[0]+'\')">'+t[1]+'</button>').join('');
+}
+
+/* ----- init ----- */
+loadSes();
+if(NET.code&&NET.token){
+  fetch('/api/rejoin',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code:NET.code,token:NET.token})}).then(r=>r.json()).then(o=>{
+    if(o.ok){ NET.host=!!o.host; NET.playerId=o.playerId||null; S=o.state; connect(); }
+    else { NET={code:null,token:null,playerId:null,host:false}; try{localStorage.removeItem(SESKEY);}catch(e){} }
+    render();
+  });
+}
+render();
+
+</script>
+</body>
+</html>

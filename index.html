@@ -137,6 +137,30 @@ const PHASES=['trading','resolve','event','market','moves','firesale','bubble','
 const PHLBL={trading:'Trading',resolve:'Resolve',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
 function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
 function colFor(net){ if(net>=3)return 0; if(net===2)return 1; if(net===1)return 2; if(net===0)return 3; if(net===-1)return 4; return 5; }
+
+/* Dynamic trend-card columns (mirror of server logic): column count scales with player count */
+function maxBuyCol(n){ return Math.max(3, Math.round(n/2)); }
+function maxSellCol(n){ return Math.max(2, Math.round(n/2)-1); }
+function cardCols(n){ const c=[],mB=maxBuyCol(n),mS=maxSellCol(n);
+  for(let k=mB;k>=1;k--) c.push('Buy '+(k===mB?k+'+':k));
+  c.push('Sell 0');
+  for(let k=1;k<=mS;k++) c.push('Sell '+(k===mS?k+'+':k));
+  return c; }
+function cardVal(regime,asset,ci,n){
+  const t=MOVE[regime][asset], mB=maxBuyCol(n);
+  const bStep=t[0]-t[1], sStep=t[5]-t[4];
+  if(ci<mB){ const k=mB-ci; return k>=3 ? t[0]+(k-3)*bStep : t[3-k]; }
+  if(ci===mB) return t[3];
+  const k=ci-mB; return k<=2 ? t[3+k] : t[5]+(k-2)*sStep;
+}
+function trendCardTable(){
+  if(!S.regime||!MOVE[S.regime]) return '<div class="muted" style="margin-top:10px;">Flip the Trend Card to see its movement table.</div>';
+  const n=S.players.length, cols=cardCols(n), pctM=ruleOn('pctMoves');
+  let h='<div class="muted" style="margin-top:10px;">🃏 '+esc(S.regime.toUpperCase())+' card — '+n+' players'+(pctM?' · percent of current price':'')+'</div><div style="overflow-x:auto;"><table><tr><th></th>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr>';
+  ASSETS.forEach(a=>{ h+='<tr><td><b>'+ASH[a]+'</b></td>'+cols.map((c,ci)=>{ const v=cardVal(S.regime,a,ci,n);
+    return '<td class="num">'+(pctM?(Math.round(v/STARTP[a]*1000)/10+'%'):fmtN(v))+'</td>'; }).join('')+'</tr>'; });
+  return h+'</table></div>';
+}
 const COLN=['Buy 3+','Buy 2','Buy 1','Sell 0','Sell 1','Sell 2+'];
 /* ================= HOUSE RULES ================= */
 const RULES=[
@@ -152,9 +176,11 @@ const RULES=[
  ['randevents','Random events','1d12 roll each round with the 15-card event deck.'],
  ['pflow','Persistent flow','Imbalance tabs carry into the next round.'],
  ['mmtabs','Market-maker tabs','Auto random tabs for 4–5 player games.'],
- ['conversions','Conversions','Preferred → Blue Chip and Bond → Blue Chip.']
+ ['conversions','Conversions','Preferred → Blue Chip and Bond → Blue Chip.'],
+ ['pctMoves','Percent movements','Trend Card moves as % of current price (each card value ÷ that asset\'s starting price).']
 ];
-function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=true); return o; }
+const RULES_OFF=['pctMoves'];
+function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=!RULES_OFF.includes(r[0])); return o; }
 function ruleOn(k){ return (S&&S.rules)?!!S.rules[k]:true; }
 
 /* ================= EVENT DECKS ================= */
@@ -197,7 +223,7 @@ const BUBBLE_DECKS={
 };
 
 
-function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=true); return o; }
+function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=!RULES_OFF.includes(r[0])); return o; }
 
 function ruleOn(k){ return (S&&S.rules)?!!S.rules[k]:true; }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -536,12 +562,14 @@ function gmHTML(){
     '<div class="muted" style="margin-top:10px;">Host override:</div><div class="btnrow">'+
     '<button class="btn ghost" onclick="setRegime(\'bull\')">🐂 Bull</button>'+
     '<button class="btn ghost" onclick="setRegime(\'mixed\')">➖ Mixed</button>'+
-    '<button class="btn ghost" onclick="setRegime(\'bear\')">🐻 Bear</button></div></div>';
+    '<button class="btn ghost" onclick="setRegime(\'bear\')">🐻 Bear</button></div>'+trendCardTable()+'</div>';
   }else if(S.phase==='moves'){
     const pv=S.preview;
-    h+='<div class="card"><h3>📊 Proposed Price Moves ('+S.regime.toUpperCase()+', Mom '+fmtN(S.momentum)+')</h3><table><tr><th>Asset</th><th>Net tabs</th><th>Col</th><th>Base</th><th>Mom</th><th>Event</th><th>Total</th><th>New</th></tr>';
+    const pctMode=pv[ASSETS[0]]&&pv[ASSETS[0]].pct;
+    h+='<div class="card"><h3>📊 Proposed Price Moves ('+S.regime.toUpperCase()+', Mom '+fmtN(S.momentum)+')</h3>'+(pctMode?'<div class="muted">Percent mode: Base/Mom shown as % of current price.</div>':'')+'<table><tr><th>Asset</th><th>Net tabs</th><th>Col</th><th>Base</th><th>Mom</th><th>Event</th><th>Total</th><th>New</th></tr>';
     ASSETS.forEach(a=>{ const r=pv[a];
-      h+='<tr><td><b>'+ASH[a]+'</b></td><td class="num">'+fmtN(r.net)+'</td><td>'+r.col+'</td><td class="num">'+fmtN(r.base)+'</td><td class="num">'+fmtN(r.mod)+'</td><td class="num">'+fmtN(r.adj)+'</td><td class="num"><b>'+fmtN(r.total)+'</b></td><td class="num"><b>'+r.neu+'</b></td></tr>'; });
+      const bD=r.pct?(r.base+'%'):fmtN(r.base), mD=r.pct?(r.mod+'%'):fmtN(r.mod);
+      h+='<tr><td><b>'+ASH[a]+'</b></td><td class="num">'+fmtN(r.net)+'</td><td>'+r.col+'</td><td class="num">'+bD+'</td><td class="num">'+mD+'</td><td class="num">'+fmtN(r.adj)+'</td><td class="num"><b>'+fmtN(r.total)+'</b></td><td class="num"><b>'+r.neu+'</b></td></tr>'; });
     h+='</table><div class="btnrow" style="margin-top:8px;"><button class="btn ok" onclick="confirmMoves()">✓ Confirm Price Moves</button></div></div>';
   }else if(S.phase==='firesale'){
     h+='<div class="card"><h3>🔥 Fire Sale Resolution</h3>';
@@ -713,7 +741,7 @@ function landingHTML(){
 }
 function showCreate(){
   const rules=RULES.map(r=>'<label class="lbl" style="display:flex;gap:10px;align-items:flex-start;">'+
-    '<input type="checkbox" id="c_ru_'+r[0]+'" checked style="width:auto;min-width:24px;min-height:24px;margin-top:2px;">'+
+    '<input type="checkbox" id="c_ru_'+r[0]+'"'+(RULES_OFF.includes(r[0])?'':' checked')+' style="width:auto;min-width:24px;min-height:24px;margin-top:2px;">'+
     '<span><b>'+r[1]+'</b><br><span class="small muted">'+r[2]+'</span></span></label>').join('');
   $('createBox').innerHTML='<div class="card"><h3>⚙️ New game</h3>'+
   '<label class="lbl">Game name</label><input type="text" id="c_name" value="Stock Market Game" maxlength="60">'+

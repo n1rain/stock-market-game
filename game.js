@@ -15,8 +15,27 @@ const DIRA={buy:'buy',marginbuy:'buy',cover:'buy',exercise:'buy',sell:'sell',sho
 const PHASES=['trading','resolve','event','market','moves','firesale','bubble','endround'];
 const PHLBL={trading:'Trading',resolve:'Resolve',event:'Event',market:'Market',moves:'Moves',firesale:'Fire Sale',bubble:'Bubble',endround:'End Round'};
 function imbThreshold(n){ if(n<=4)return 2; if(n<=6)return 3; if(n<=8)return 4; if(n<=10)return 5; return 6; }
-function colFor(net){ if(net>=3)return 0; if(net===2)return 1; if(net===1)return 2; if(net===0)return 3; if(net===-1)return 4; return 5; }
-const COLN=['Buy 3+','Buy 2','Buy 1','Sell 0','Sell 1','Sell 2+'];
+/* Movement columns scale with player count: 4-6 players -> Buy 3+ max (classic card);
+   larger games extend the card (e.g. 10 players -> Buy 5+ / Sell 4+), extrapolating values. */
+function maxBuyCol(n){ return Math.max(3, Math.round(n/2)); }
+function maxSellCol(n){ return Math.max(2, Math.round(n/2)-1); }
+function moveCols(regime, asset, n){
+  const t=MOVE[regime][asset]; // [buy3+,buy2,buy1,sell0,sell1,sell2+]
+  const mB=maxBuyCol(n), mS=maxSellCol(n), cols=[];
+  const bStep=t[0]-t[1], sStep=t[5]-t[4];
+  for(let k=mB;k>=1;k--) cols.push({label:'Buy '+(k===mB?k+'+':k), val: k>=3 ? t[0]+(k-3)*bStep : t[3-k]});
+  cols.push({label:'Sell 0', val:t[3]});
+  for(let k=1;k<=mS;k++) cols.push({label:'Sell '+(k===mS?k+'+':k), val: k<=2 ? t[3+k] : t[5]+(k-2)*sStep});
+  return cols;
+}
+function colForDyn(net,n){
+  const mB=maxBuyCol(n), mS=maxSellCol(n);
+  if(net>=mB) return 0;
+  if(net>=1) return mB-net;
+  if(net===0) return mB;
+  const s=-net;
+  return s>=mS ? mB+mS : mB+s;
+}
 /* ================= HOUSE RULES ================= */
 const RULES=[
  ['splits','Stock splits','BC ≥ 80 and Spec ≥ 100 split 2-for-1; conversion ratios adjust.'],
@@ -31,9 +50,11 @@ const RULES=[
  ['randevents','Random events','1d12 roll each round with the 15-card event deck.'],
  ['pflow','Persistent flow','Imbalance tabs carry into the next round.'],
  ['mmtabs','Market-maker tabs','Auto random tabs for 4–5 player games.'],
- ['conversions','Conversions','Preferred → Blue Chip and Bond → Blue Chip.']
+ ['conversions','Conversions','Preferred → Blue Chip and Bond → Blue Chip.'],
+ ['pctMoves','Percent movements','Trend Card moves as % of current price (each card value ÷ that asset\'s starting price). Off by default.']
 ];
-function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=true); return o; }
+const RULES_OFF_DEFAULT=['pctMoves'];
+function allTrue(){ const o={}; RULES.forEach(r=>o[r[0]]=!RULES_OFF_DEFAULT.includes(r[0])); return o; }
 function ruleOn(k){ return (S&&S.rules)?!!S.rules[k]:true; }
 function setRule(k,v){
   if(!S) return; S.rules=S.rules||allTrue(); S.rules[k]=v;
@@ -423,12 +444,22 @@ function setRegime(r){
   }
   // preview moves
   const tc=tabCounts(); const pv={};
+  const nP=S.players.length, pct=ruleOn('pctMoves');
   ASSETS.forEach(a=>{
     const net=tc[a].buy-tc[a].sell;
-    const base=MOVE[r][a][colFor(net)];
+    const cols=moveCols(r,a,nP), ci=colForDyn(net,nP);
+    const base=cols[ci].val;
     const mod=MOMMOD[a][Math.abs(S.momentum)]*(S.momentum>0?1:(S.momentum<0?-1:0));
     const adj=(S.pendingMoves[a]||0)+(S.nextMoves[a]||0);
-    pv[a]={net:net,col:COLN[colFor(net)],base:base,mod:mod,adj:adj,total:base+mod+adj,neu:S.prices[a]+base+mod+adj};
+    let dBase=base, dMod=mod, total, neu;
+    if(pct){
+      dBase=Math.round(base/STARTP[a]*1000)/10; dMod=Math.round(mod/STARTP[a]*1000)/10;
+      total=Math.round(S.prices[a]*(base+mod)/STARTP[a])+adj;
+      neu=S.prices[a]+total;
+    }else{
+      total=base+mod+adj; neu=S.prices[a]+total;
+    }
+    pv[a]={net:net,col:cols[ci].label,base:dBase,mod:dMod,adj:adj,total:total,neu:neu,pct:pct};
   });
   S.preview=pv; S.phase='moves';
   
@@ -650,4 +681,4 @@ function setS(s){ S=s; }
 module.exports={newGame,getS,setS,addPlayer,submitTrades,lockResolve,rollD12,setRegime,confirmMoves,
 rollFireSale,setFireBuyer,setFireBuyerQty,confirmFireSale,bubbleStep,drawBubble,endRound,genMM,setRule,flipTrend,
 setBubbleRange,forcedCover,player,netWorth,longVal,shortLiab,tabCounts,tradeError,RULES,allTrue,
-PHASES,PHLBL,ASSETS,ANAME,ASH,APER,STARTP,MOVE,MOMMOD,COLN,RANDEVENTS,BUBBLE_DECKS,imbThreshold,fmt,fmtN};
+PHASES,PHLBL,ASSETS,ANAME,ASH,APER,STARTP,MOVE,MOMMOD,moveCols,colForDyn,maxBuyCol,maxSellCol,RANDEVENTS,BUBBLE_DECKS,imbThreshold,fmt,fmtN};
